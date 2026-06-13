@@ -1,10 +1,24 @@
 # Session 04 — Live enrichment (scraping)
 
-**Status:** ⬜ not started
+**Status:** ✅ done — offline gate green + live spot-check passed (27 candidates: emails/owners/
+tech extracted; robots-disallowed skipped; second run = 0 refetches, 29→29 cache files).
 **Goal:** make Stage 3 real. Replace `LiveHttpClient` stubs with a polite, robots-aware,
 concurrent scraper. The extraction logic in `enrich.py` already works on HTML — this session is
 about fetching that HTML correctly and considerately.
 **Prereq:** Session 03 done (real candidates to enrich).
+
+**Done so far:**
+- `LiveHttpClient` is now async over a shared `httpx.AsyncClient`: per-host `robots.txt`
+  fetched/parsed/cached/honored; `asyncio.Semaphore(max_concurrency)` caps in-flight GETs;
+  per-request timeout + bounded backoff on 429/5xx/network. (`src/leadscout/clients.py`)
+- New `AsyncHttpClient` Protocol + `enrich.enrich_async` (gather over leads), sharing a `_merge`
+  helper with the unchanged sync `enrich_lead`. Pipeline branches on `cfg.offline`.
+- New offline-only `tests/test_live_enrich.py` (9 tests via `httpx.MockTransport`, no network/sleep).
+- Gate: `uv run pytest -q` → **27 passed**; `ruff` clean; `mypy` clean; offline smoke run unchanged.
+
+**Remaining (manual, needs real key — owner to run):** step 8 live spot-check on ~5 Bengaluru
+dental candidates (extracts where present; robots-disallowed skipped; second run = zero refetches),
+then flip this box + the README row to ✅ and commit.
 
 ## Non-negotiable: scraping etiquette (.claude/rules.md)
 - Respect `robots.txt` per host (cache the parsed rules per host).

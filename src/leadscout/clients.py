@@ -11,11 +11,14 @@ Tests and `--offline` use the fixture clients; nothing live is ever called in te
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
+from urllib.robotparser import RobotFileParser
 
 import httpx
 
@@ -208,6 +211,18 @@ class HttpClient(Protocol):
     def fetch(self, url: str) -> str | None: ...
 
 
+class AsyncHttpClient(Protocol):
+    """Async twin of `HttpClient`, used only on live runs (see `enrich.enrich_async`).
+
+    The sync `HttpClient` Protocol + `FixtureHttpClient` are what every offline test drives; this
+    parallel async surface lets the live scraper own its concurrency/politeness cap internally
+    without reshaping the deterministic fixture path.
+    """
+
+    async def robots_allows(self, url: str) -> bool: ...
+    async def fetch(self, url: str) -> str | None: ...
+
+
 class FixtureHttpClient:
     """Serves recorded HTML pages from fixtures/scrapes/<host>.html. Zero network.
 
@@ -233,23 +248,81 @@ class FixtureHttpClient:
 
 
 class LiveHttpClient:
-    """Live scraper: robots.txt aware, rate-limited, real User-Agent. Real runs only."""
+    """Live scraper: robots.txt aware, concurrency-capped, real User-Agent. Real runs only.
+
+    Async over a shared `httpx.AsyncClient`. Politeness lives here, not in the stage:
+      - per-host `robots.txt` fetched once, parsed, cached, and honored (disallow → skip);
+      - an `asyncio.Semaphore(max_concurrency)` bounds in-flight page GETs;
+      - a per-request timeout (on the client) plus bounded exponential backoff on 429/5xx/network.
+
+    The `client` param is the offline test seam: inject
+    `httpx.AsyncClient(transport=httpx.MockTransport(handler))` so pytest never touches the
+    network. It is impl detail, not part of the `AsyncHttpClient` Protocol.
+    """
 
     USER_AGENT = "LeadScoutBot/0.1 (+internal lead research; respects robots.txt)"
 
-    def __init__(self, timeout_s: float = 10.0) -> None:
+    def __init__(
+        self,
+        timeout_s: float = 10.0,
+        max_concurrency: int = 5,
+        max_retries: int = 2,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         self.timeout_s = timeout_s
-
-    def robots_allows(self, url: str) -> bool:  # pragma: no cover - live path
-        raise NotImplementedError(
-            "TODO(live): fetch & parse robots.txt for the host; honor it. Mocked in tests."
+        self._max_retries = max_retries
+        self._client = client or httpx.AsyncClient(
+            timeout=timeout_s,
+            follow_redirects=True,
+            headers={"User-Agent": self.USER_AGENT},
         )
+        self._sem = asyncio.Semaphore(max_concurrency)
+        # host -> parsed robots (None = indeterminate, treat as disallow)
+        self._robots: dict[str, RobotFileParser | None] = {}
 
-    def fetch(self, url: str) -> str | None:  # pragma: no cover - live path
-        raise NotImplementedError(
-            "TODO(live): httpx GET with User-Agent + timeout + backoff; return HTML. "
-            "Mocked in tests."
-        )
+    async def robots_allows(self, url: str) -> bool:
+        parts = urlsplit(url)
+        host = parts.netloc
+        if host not in self._robots:
+            self._robots[host] = await self._load_robots(parts.scheme, host)
+        rp = self._robots[host]
+        if rp is None:
+            return False  # indeterminate robots → be polite, skip
+        return rp.can_fetch(self.USER_AGENT, url)
+
+    async def _load_robots(self, scheme: str, host: str) -> RobotFileParser | None:
+        rp = RobotFileParser()
+        robots_url = f"{scheme}://{host}/robots.txt"
+        try:
+            resp = await self._client.get(robots_url)
+        except httpx.HTTPError:
+            return None  # network error → indeterminate → disallow
+        if resp.is_success:
+            rp.parse(resp.text.splitlines())
+            return rp
+        if 400 <= resp.status_code < 500:
+            rp.parse([])  # no robots / client error → allow-all
+            return rp
+        return None  # 5xx → indeterminate → disallow
+
+    async def fetch(self, url: str) -> str | None:
+        async with self._sem:
+            for attempt in range(self._max_retries + 1):
+                try:
+                    resp = await self._client.get(url)
+                except httpx.HTTPError:
+                    if attempt < self._max_retries:
+                        await asyncio.sleep(0.5 * 2**attempt)
+                        continue
+                    return None
+                if resp.is_success:
+                    return resp.text
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    if attempt < self._max_retries:
+                        await asyncio.sleep(0.5 * 2**attempt)
+                        continue
+                return None  # other 4xx (or retries exhausted) → give up, no retry
+        return None  # pragma: no cover - unreachable
 
 
 # =========================================================================== LLM (score)

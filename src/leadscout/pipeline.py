@@ -6,10 +6,12 @@ deterministic; this module just wires them together and carries the dropped-reco
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
+from typing import cast
 
 from .cache import JsonCache
-from .clients import HttpClient, LlmClient, PlacesClient
+from .clients import AsyncHttpClient, HttpClient, LlmClient, PlacesClient
 from .config import RunConfig
 from .models import DropRecord, GeographyInput, ICPSpec, Lead, NicheSpec
 from .stages import discover as s_discover
@@ -35,7 +37,7 @@ def run_pipeline(
     icp: ICPSpec,
     cfg: RunConfig,
     places: PlacesClient,
-    http: HttpClient,
+    http: HttpClient | AsyncHttpClient,
     llm: LlmClient,
 ) -> PipelineResult:
     cache = JsonCache(cfg.cache_dir)
@@ -46,8 +48,14 @@ def run_pipeline(
     # Stage 2 — filter (deterministic, free; the cost gate before any LLM token)
     candidates, dropped = s_filter.filter_leads(raw, icp, niche)
 
-    # Stage 3 — enrich (deterministic, cached, robots-aware)
-    enriched = s_enrich.enrich(candidates, http, cache)
+    # Stage 3 — enrich (deterministic, cached, robots-aware). Offline drives the sync fixture
+    # path; live runs use the concurrent async scraper (politeness cap lives in the client).
+    if cfg.offline:
+        enriched = s_enrich.enrich(candidates, cast("HttpClient", http), cache)
+    else:
+        enriched = asyncio.run(
+            s_enrich.enrich_async(candidates, cast("AsyncHttpClient", http), cache)
+        )
 
     # Stage 4 — score (LLM, ONLY on survivors, budget-capped)
     scored = s_score.score(enriched, icp, llm, cfg)

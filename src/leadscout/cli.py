@@ -15,6 +15,7 @@ import typer
 from . import __version__
 from .cache import JsonCache
 from .clients import (
+    AsyncHttpClient,
     HttpClient,
     LiveHttpClient,
     LiveLlmClient,
@@ -51,7 +52,7 @@ def run(
     )
 
     places: PlacesClient
-    http: HttpClient
+    http: HttpClient | AsyncHttpClient
     llm: LlmClient
     if offline:
         places, http, llm = load_fixture_clients(FIXTURES_DIR)
@@ -61,7 +62,9 @@ def run(
             cache=JsonCache(cfg.cache_dir),
             timeout_s=cfg.request_timeout_s,
         )
-        http = LiveHttpClient(cfg.request_timeout_s)
+        http = LiveHttpClient(
+            timeout_s=cfg.request_timeout_s, max_concurrency=cfg.max_concurrency
+        )
         llm = LiveLlmClient(require_key("OPENAI_API_KEY"))
 
     result = run_pipeline(geography, niche_spec, icp_spec, cfg, places, http, llm)

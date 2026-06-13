@@ -10,10 +10,11 @@ reviews where complaints (and thus pain signals) live.
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 from ..cache import JsonCache
-from ..clients import HttpClient
+from ..clients import AsyncHttpClient, HttpClient
 from ..models import Lead
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
@@ -58,6 +59,13 @@ def _extract(html: str) -> dict:
     }
 
 
+def _merge(lead: Lead, cached: dict) -> Lead:
+    """Apply non-empty enrich fields onto the lead. Shared by the sync and async paths so they
+    can never drift."""
+    update = {k: v for k, v in cached.items() if v not in (None, [], "")}
+    return lead.model_copy(update=update)
+
+
 def enrich_lead(lead: Lead, http: HttpClient, cache: JsonCache) -> Lead:
     cached = cache.get("enrich", lead.place_id)
     if cached is None:
@@ -68,11 +76,30 @@ def enrich_lead(lead: Lead, http: HttpClient, cache: JsonCache) -> Lead:
                 cached = _extract(html)
         cache.set("enrich", lead.place_id, cached)
 
-    update = {k: v for k, v in cached.items() if v not in (None, [], "")}
-    return lead.model_copy(update=update)
+    return _merge(lead, cached)
 
 
 def enrich(leads: list[Lead], http: HttpClient, cache: JsonCache) -> list[Lead]:
     """Enrich each candidate. Concurrency/politeness cap lives in the live HttpClient; the
     fixture path is synchronous and cache-backed."""
     return [enrich_lead(lead, http, cache) for lead in leads]
+
+
+async def enrich_async(
+    leads: list[Lead], http: AsyncHttpClient, cache: JsonCache
+) -> list[Lead]:
+    """Live path: same per-lead logic as `enrich_lead`, but awaits robots/fetch and runs leads
+    concurrently. The concurrency/politeness cap lives inside the live HttpClient's semaphore."""
+
+    async def _one(lead: Lead) -> Lead:
+        cached = cache.get("enrich", lead.place_id)
+        if cached is None:
+            cached = {}
+            if lead.website and await http.robots_allows(lead.website):
+                html = await http.fetch(lead.website)
+                if html:
+                    cached = _extract(html)
+            cache.set("enrich", lead.place_id, cached)
+        return _merge(lead, cached)
+
+    return list(await asyncio.gather(*(_one(lead) for lead in leads)))
