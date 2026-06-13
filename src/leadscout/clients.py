@@ -12,10 +12,17 @@ Tests and `--offline` use the fixture clients; nothing live is ever called in te
 from __future__ import annotations
 
 import json
+import logging
+import time
 from pathlib import Path
 from typing import Any, Protocol
 
+import httpx
+
+from .cache import JsonCache
 from .models import BBox, ScoreResult
+
+logger = logging.getLogger(__name__)
 
 # =========================================================================== Places
 
@@ -48,24 +55,149 @@ class FixturePlacesClient:
 
 
 class LivePlacesClient:
-    """Live Google Places (New) + Geocoding. Network calls happen only on real runs."""
+    """Live Google Places (New) Text Search + Geocoding. Network only on real runs.
 
-    def __init__(self, api_key: str) -> None:
+    Caches every (tile,keyword) page-set under namespace "places_pages" and every normalized
+    place under "places" keyed by place_id, so a second run of the same geo makes ~zero new API
+    calls. The `client` param is an offline test seam: inject
+    `httpx.Client(transport=httpx.MockTransport(handler))` so pytest never touches the network.
+    The `PlacesClient` Protocol is unchanged — `cache`/`timeout_s`/`client` are impl detail.
+    """
+
+    GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+    SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+    FIELD_MASK = (
+        "places.id,places.displayName,places.primaryType,places.rating,"
+        "places.userRatingCount,places.websiteUri,places.internationalPhoneNumber,"
+        "places.businessStatus,places.formattedAddress,nextPageToken"
+    )
+    MAX_PAGES = 3
+    MAX_RESULTS = 60
+    RADIUS_CAP_M = 50000.0
+
+    def __init__(
+        self,
+        api_key: str,
+        cache: JsonCache | None = None,
+        timeout_s: float = 10.0,
+        client: httpx.Client | None = None,
+    ) -> None:
         self.api_key = api_key
+        self._cache = cache
+        self._http = client or httpx.Client(timeout=timeout_s)
 
-    def geocode_bbox(self, query: str) -> BBox:  # pragma: no cover - live path
-        raise NotImplementedError(
-            "TODO(live): call Geocoding API for `query`, return the viewport bbox. "
-            "Needs GOOGLE_MAPS_API_KEY. Mocked in tests."
-        )
+    def geocode_bbox(self, query: str) -> BBox:
+        if self._cache is not None:
+            cached = self._cache.get("geocode", query)
+            if cached is not None:
+                return BBox.model_validate(cached)
 
-    def search(  # pragma: no cover - live path
-        self, lat: float, lng: float, radius_km: float, keyword: str
-    ) -> list[dict]:
-        raise NotImplementedError(
-            "TODO(live): Places Nearby/Text Search at (lat,lng,radius); paginate all ~3 pages "
-            "(60 cap); return raw place dicts. Needs GOOGLE_MAPS_API_KEY. Mocked in tests."
+        resp = self._http.get(self.GEOCODE_URL, params={"address": query, "key": self.api_key})
+        self._raise_for_status(resp, "Geocoding")
+        data = resp.json()
+        status = data.get("status")
+        if status != "OK":
+            msg = data.get("error_message", "")
+            raise RuntimeError(f"Geocoding API returned status={status!r} for {query!r}: {msg}")
+
+        vp = data["results"][0]["geometry"]["viewport"]
+        ne, sw = vp["northeast"], vp["southwest"]
+        bbox = BBox(
+            min_lat=sw["lat"], min_lng=sw["lng"], max_lat=ne["lat"], max_lng=ne["lng"]
         )
+        if self._cache is not None:
+            self._cache.set("geocode", query, bbox.model_dump())
+        return bbox
+
+    def search(self, lat: float, lng: float, radius_km: float, keyword: str) -> list[dict]:
+        radius_m = min(radius_km, 50) * 1000
+        key = f"{round(lat, 4)},{round(lng, 4)},r{int(radius_m)}|{keyword}"
+        if self._cache is not None and self._cache.has("places_pages", key):
+            cached = self._cache.get("places_pages", key)
+            return list(cached) if cached is not None else []
+
+        results: list[dict] = []
+        page_token: str | None = None
+        pages = 0
+        while True:
+            data = self._search_page(keyword, lat, lng, radius_m, page_token)
+            for p in data.get("places", []):
+                results.append(self._normalize(p))
+            pages += 1
+            page_token = data.get("nextPageToken")
+            if not page_token or pages >= self.MAX_PAGES or len(results) >= self.MAX_RESULTS:
+                if page_token:
+                    # 60-cap / saturation: log, do NOT subdivide here. Subdivision/keyword
+                    # narrowing hooks in at discover.resolve_tiles (see TODO there).
+                    logger.warning(
+                        "(tile,keyword) saturated: lat=%s lng=%s keyword=%r hit %d results / "
+                        "%d pages with nextPageToken still present; consider tile subdivision.",
+                        lat, lng, keyword, len(results), pages,
+                    )
+                break
+
+        if self._cache is not None:
+            self._cache.set("places_pages", key, results)
+            for place in results:
+                self._cache.set("places", place["place_id"], place)
+        return results
+
+    def _search_page(
+        self, keyword: str, lat: float, lng: float, radius_m: float, page_token: str | None
+    ) -> dict:
+        headers = {
+            "X-Goog-Api-Key": self.api_key,
+            "Content-Type": "application/json",
+            "X-Goog-FieldMask": self.FIELD_MASK,
+        }
+        body: dict[str, Any] = {
+            "textQuery": keyword,
+            "pageSize": 20,
+            # Places (New) Text Search: a circle goes under locationBias (locationRestriction
+            # only accepts a rectangle). Bias centers results on the tile; the 50 km cap + tiling
+            # + dedup still bound the search area. (Confirmed via a live 400 — see Session 03.)
+            "locationBias": {
+                "circle": {
+                    "center": {"latitude": lat, "longitude": lng},
+                    "radius": min(radius_m, self.RADIUS_CAP_M),
+                }
+            },
+        }
+        if page_token:
+            body["pageToken"] = page_token
+
+        # Pagination-token race (live only): a freshly issued pageToken may briefly return
+        # INVALID_ARGUMENT. Retry a couple of times with a short backoff. Tests use MockTransport
+        # returning valid pages immediately, so pytest never sleeps (token only set on page 2+).
+        attempts = 3 if page_token else 1
+        for attempt in range(attempts):
+            resp = self._http.post(self.SEARCH_URL, headers=headers, json=body)
+            if resp.status_code == 400 and attempt < attempts - 1:
+                time.sleep(1.5)  # pragma: no cover - live-only backoff
+                continue
+            self._raise_for_status(resp, "Places Text Search")
+            return resp.json()
+        self._raise_for_status(resp, "Places Text Search")  # pragma: no cover - exhausted retries
+        return resp.json()  # pragma: no cover
+
+    @staticmethod
+    def _raise_for_status(resp: httpx.Response, api: str) -> None:
+        """Raise with Google's response body included — a 403/REQUEST_DENIED means API enablement
+        or key restriction, not a code bug, and the body says exactly which. Don't swallow it."""
+        if resp.is_success:
+            return
+        body = resp.text
+        try:
+            err = resp.json().get("error", {})
+            body = err.get("message", body) or body
+        except Exception:  # pragma: no cover - non-JSON error body
+            pass
+        raise RuntimeError(f"{api} API returned HTTP {resp.status_code}: {body}")
+
+    @staticmethod
+    def _normalize(p: dict) -> dict:
+        """Shape a New-API place for `discover._raw_to_lead` (stable contract — do not edit it)."""
+        return {**p, "place_id": p["id"], "name": (p.get("displayName") or {}).get("text", "")}
 
 
 # =========================================================================== HTTP (scrape)

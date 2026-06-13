@@ -23,6 +23,9 @@ def resolve_tiles(geo: GeographyInput, client: PlacesClient) -> list[Tile]:
         return [Tile(lat=p.lat, lng=p.lng, radius_km=min(p.radius_km, PLACES_RADIUS_CAP_KM))]
 
     if geo.bbox is not None:
+        # TODO(saturation): when a (tile,keyword) saturates the 60-result/3-page cap (logged by
+        # LivePlacesClient.search), subdivide that tile / narrow the keyword here. Not implemented
+        # this step — see Session 03 plan §5.
         return _tile_bbox(geo.bbox)
 
     # city / state -> geocode to a bbox -> tile it

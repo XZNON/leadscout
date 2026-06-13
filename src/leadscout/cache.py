@@ -17,7 +17,9 @@ class JsonCache:
         self.root = Path(root)
 
     def _path(self, namespace: str, key: str) -> Path:
-        safe = key.replace("/", "_").replace(":", "_")
+        # Replace every character illegal in a Windows/POSIX filename so cache keys like
+        # "12.97,77.59,r10000|dentist" are safe on disk.
+        safe = "".join("_" if c in '<>:"/\\|?*' else c for c in key)
         return self.root / namespace / f"{safe}.json"
 
     def get(self, namespace: str, key: str) -> Any | None:

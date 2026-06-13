@@ -1,6 +1,6 @@
 # Session 03 — Live discovery (Google Places)
 
-**Status:** ⬜ not started
+**Status:** ✅ done
 **Goal:** make Stage 1 real. Replace `LivePlacesClient` stubs in `clients.py` with live Google
 Places API (New) + Geocoding, keeping the same `PlacesClient` interface so nothing downstream or
 the tests change.

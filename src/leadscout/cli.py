@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 
 from . import __version__
+from .cache import JsonCache
 from .clients import (
     HttpClient,
     LiveHttpClient,
@@ -55,7 +56,11 @@ def run(
     if offline:
         places, http, llm = load_fixture_clients(FIXTURES_DIR)
     else:
-        places = LivePlacesClient(require_key("GOOGLE_MAPS_API_KEY"))
+        places = LivePlacesClient(
+            require_key("GOOGLE_MAPS_API_KEY"),
+            cache=JsonCache(cfg.cache_dir),
+            timeout_s=cfg.request_timeout_s,
+        )
         http = LiveHttpClient(cfg.request_timeout_s)
         llm = LiveLlmClient(require_key("OPENAI_API_KEY"))
 

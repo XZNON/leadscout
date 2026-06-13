@@ -32,14 +32,17 @@ ALLOWLIST = {".env.example", "scripts/check_secrets.py"}
 def staged_files() -> list[str]:
     out = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
     )
-    return [f.strip() for f in out.stdout.splitlines() if f.strip()]
+    return [f.strip() for f in (out.stdout or "").splitlines() if f.strip()]
 
 
 def staged_content(path: str) -> str:
-    out = subprocess.run(["git", "show", f":{path}"], capture_output=True, text=True)
-    return out.stdout if out.returncode == 0 else ""
+    out = subprocess.run(
+        ["git", "show", f":{path}"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return out.stdout or "" if out.returncode == 0 else ""
 
 
 def main() -> int:
