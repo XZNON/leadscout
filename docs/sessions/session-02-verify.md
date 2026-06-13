@@ -1,6 +1,6 @@
 # Session 02 — Verify & green the skeleton
 
-**Status:** ⬜ not started
+**Status:** ✅ done
 **Goal:** prove the bootstrap actually runs. Install, get tests green, do one offline run, commit.
 **Prereq:** Session 01 files exist.
 

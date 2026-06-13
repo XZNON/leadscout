@@ -14,9 +14,12 @@ import typer
 
 from . import __version__
 from .clients import (
+    HttpClient,
     LiveHttpClient,
     LiveLlmClient,
     LivePlacesClient,
+    LlmClient,
+    PlacesClient,
     load_fixture_clients,
 )
 from .config import RunConfig, load_geography, load_icp, load_niche, require_key
@@ -46,6 +49,9 @@ def run(
         offline=offline, max_score=(0 if no_score else max_score), out_dir=Path(out_dir)
     )
 
+    places: PlacesClient
+    http: HttpClient
+    llm: LlmClient
     if offline:
         places, http, llm = load_fixture_clients(FIXTURES_DIR)
     else:

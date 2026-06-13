@@ -17,7 +17,6 @@ from typing import Any, Protocol
 
 from .models import BBox, ScoreResult
 
-
 # =========================================================================== Places
 
 

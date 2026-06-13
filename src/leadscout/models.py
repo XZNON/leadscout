@@ -7,7 +7,7 @@ cross-stage change.
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -33,13 +33,13 @@ class BBox(BaseModel):
 class GeographyInput(BaseModel):
     """One of: point+radius, named city/state, or an explicit bbox. Resolved into tiles."""
 
-    point: Optional[Point] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    bbox: Optional[BBox] = None
+    point: Point | None = None
+    city: str | None = None
+    state: str | None = None
+    bbox: BBox | None = None
 
     @model_validator(mode="after")
-    def _exactly_one(self) -> "GeographyInput":
+    def _exactly_one(self) -> GeographyInput:
         provided = [self.point, self.city, self.state, self.bbox]
         if sum(x is not None for x in provided) != 1:
             raise ValueError("GeographyInput needs exactly one of: point, city, state, bbox")
@@ -99,31 +99,31 @@ class Lead(BaseModel):
     place_id: str
     name: str
     source: Source = "google_places"
-    category: Optional[str] = None
-    place_type: Optional[str] = None
-    address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    phone: Optional[str] = None
-    website: Optional[str] = None
-    rating: Optional[float] = None
-    review_count: Optional[int] = None
+    category: str | None = None
+    place_type: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    rating: float | None = None
+    review_count: int | None = None
     has_website: bool = False
     is_operational: bool = True
 
     # --- stage 3 (enrichment) ---
-    email: Optional[str] = None
-    owner_name: Optional[str] = None
-    site_text: Optional[str] = None  # scraped, readable homepage/about text
+    email: str | None = None
+    owner_name: str | None = None
+    site_text: str | None = None  # scraped, readable homepage/about text
     reviews: list[str] = Field(default_factory=list)
     detected_tech: list[str] = Field(default_factory=list)  # booking platforms, etc.
 
     # --- stage 4 (scoring) ---
-    fit_score: Optional[int] = None  # 0-100
+    fit_score: int | None = None  # 0-100
     detected_signals: list[str] = Field(default_factory=list)
     disqualifiers_hit: list[str] = Field(default_factory=list)
-    reasoning: Optional[str] = None
-    suggested_opener: Optional[str] = None
+    reasoning: str | None = None
+    suggested_opener: str | None = None
 
     @property
     def contactable(self) -> bool:

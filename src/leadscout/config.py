@@ -30,7 +30,7 @@ class RunConfig(BaseModel):
     request_timeout_s: float = 10.0
 
     @classmethod
-    def from_env(cls, **overrides: object) -> "RunConfig":
+    def from_env(cls, **overrides: object) -> RunConfig:
         load_dotenv()
         env_defaults: dict[str, object] = {}
         if model := os.getenv("LEADSCOUT_SCORING_MODEL"):

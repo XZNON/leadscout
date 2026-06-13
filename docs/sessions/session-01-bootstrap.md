@@ -1,6 +1,6 @@
 # Session 01 — Bootstrap & walking skeleton
 
-**Status:** 🔨 in progress (code written, not yet verified)
+**Status:** ✅ done (verified offline in Session 02)
 **Goal:** stand up the harness, scaffold, and an offline four-stage pipeline with tests — the
 boilerplate every future session builds on.
 
