@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 from urllib.robotparser import RobotFileParser
 
 import httpx
+from openai import OpenAI
 
 from .cache import JsonCache
 from .models import BBox, ScoreResult
@@ -376,20 +377,69 @@ class FixtureLlmClient:
         return self._calls * self.PRICE_PER_CALL_USD
 
 
-class LiveLlmClient:
-    """Live OpenAI structured-output scorer. Real runs only."""
+# USD per 1K tokens (input, output). Confirmed June 2026; update if OpenAI reprices.
+MODEL_PRICES: dict[str, tuple[float, float]] = {"gpt-4o-mini": (0.00015, 0.00060)}
+_DEFAULT_PRICE = (0.00015, 0.00060)  # conservative fallback; logged on use
 
-    def __init__(self, api_key: str) -> None:
+
+def _cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Real token cost so the budget ceiling stops on real money, not a $0 no-op."""
+    rate = MODEL_PRICES.get(model)
+    if rate is None:
+        logger.warning(
+            "No price for model %r; using default rate %s/1K (input,output). "
+            "Add it to MODEL_PRICES for accurate budget accounting.",
+            model, _DEFAULT_PRICE,
+        )
+        rate = _DEFAULT_PRICE
+    in_rate, out_rate = rate
+    return prompt_tokens / 1000 * in_rate + completion_tokens / 1000 * out_rate
+
+
+class LiveLlmClient:
+    """Live OpenAI structured-output scorer. Real runs only.
+
+    Uses Structured Outputs (`beta.chat.completions.parse(response_format=ScoreResult)`) so the
+    response parses straight into a `ScoreResult` — no prose, no regex. A safety refusal or a
+    missing parse is a failure: retry once, then raise (never ship a default/garbage score).
+    Cost and call count accrue only on success, from `response.usage`.
+
+    The `client` param is the offline test seam: inject a fake exposing
+    `.beta.chat.completions.parse(...)` so pytest never touches the network or needs a key. It is
+    impl detail, not part of the `LlmClient` Protocol.
+    """
+
+    def __init__(self, api_key: str, client: OpenAI | None = None) -> None:
         self.api_key = api_key
         self._calls = 0
         self._spent = 0.0
+        self._client = client or OpenAI(api_key=api_key)
 
-    def score(self, model: str, prompt: str) -> ScoreResult:  # pragma: no cover - live path
-        raise NotImplementedError(
-            "TODO(live): call OpenAI `model` with Structured Outputs (response_format json_schema "
-            "matching ScoreResult); accumulate token cost into spent_usd. Needs OPENAI_API_KEY. "
-            "Mocked in tests."
-        )
+    def score(self, model: str, prompt: str) -> ScoreResult:
+        for attempt in range(2):  # one retry, then raise
+            try:
+                resp = self._client.beta.chat.completions.parse(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format=ScoreResult,
+                    temperature=0,
+                )
+                msg = resp.choices[0].message
+                if msg.refusal or msg.parsed is None:
+                    raise ValueError(f"model refused or returned no parse: {msg.refusal!r}")
+                result = msg.parsed
+                usage = resp.usage
+                if usage is None:
+                    raise ValueError("response missing usage; cannot account cost")
+                # Accrue only on success so a failed-then-retried call isn't double-charged.
+                self._spent += _cost_usd(model, usage.prompt_tokens, usage.completion_tokens)
+                self._calls += 1
+                return result
+            except Exception:
+                if attempt == 0:
+                    continue
+                raise
+        raise AssertionError("unreachable")  # pragma: no cover
 
     @property
     def call_count(self) -> int:

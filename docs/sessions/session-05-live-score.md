@@ -1,6 +1,6 @@
 # Session 05 — Live scoring (OpenAI)
 
-**Status:** ⬜ not started
+**Status:** ✅ done
 **Goal:** make Stage 4 — *the product* — real. Replace `LiveLlmClient` stubs with a live OpenAI
 structured-output call that returns a `ScoreResult`, accumulates real token cost into `spent_usd`,
 and is enforced by the budget ceiling already in `score.py`.

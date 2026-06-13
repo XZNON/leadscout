@@ -17,7 +17,7 @@ of work: open it, do the steps, hit its "Definition of done", commit, then move 
 | 02 | [Verify & green the skeleton](session-02-verify.md) | ✅ | `uv sync`, pytest green, offline run, first commit |
 | 03 | [Live discovery (Google Places)](session-03-live-discover.md) | ✅ | Replace Places/Geocoding stubs; real tiling + cache |
 | 04 | [Live enrichment (scraping)](session-04-live-enrich.md) | ✅ | robots-aware async scraper replaces HTTP stub |
-| 05 | [Live scoring (OpenAI)](session-05-live-score.md) | ⬜ | Structured-output LLM + token-cost budget enforcement |
+| 05 | [Live scoring (OpenAI)](session-05-live-score.md) | ✅ | Structured-output LLM + token-cost budget enforcement |
 | 06 | [First real run & tuning](session-06-real-run.md) | ⬜ | End-to-end on Bengaluru dental; tune ICP/filters |
 | 07+ | [Post-MVP backlog](session-07-post-mvp.md) | ⬜ | JustDial/IndiaMART, state tiling, owner enrichment, SQLite |
 
