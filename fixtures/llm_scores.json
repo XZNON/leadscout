@@ -1,0 +1,26 @@
+{
+  "p_bright": {
+    "fit_score": 88,
+    "detected_signals": [
+      "multiple reviews mention being unable to get through on the phone to book",
+      "website explicitly says no online booking, call only",
+      "site last updated 2014 (DIY / outdated)"
+    ],
+    "disqualifiers_hit": [],
+    "reasoning": "Owner-operated single clinic, in review range, clear phone-booking friction and no online booking — strong fit for appointment-booking SaaS.",
+    "suggested_opener": "Noticed a couple of your Google reviews mention trouble getting through on the phone to book — we help clinics like Bright Smile take bookings online so those calls don't get lost."
+  },
+  "p_cityhosp": {
+    "fit_score": 72,
+    "detected_signals": [
+      "already lists Practo for online booking",
+      "part of the City Hospital chain"
+    ],
+    "disqualifiers_hit": [
+      "already lists a booking platform (Practo)",
+      "part of a hospital chain"
+    ],
+    "reasoning": "Already on Practo and part of a hospital chain — both ICP disqualifiers.",
+    "suggested_opener": "Saw you already handle online booking through Practo — likely not a fit right now."
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "bbox": { "min_lat": 12.95, "min_lng": 77.58, "max_lat": 12.99, "max_lng": 77.62 },
+  "results": [
+    {
+      "place_id": "p_bright",
+      "name": "Bright Smile Dental",
+      "primaryType": "dentist",
+      "category": "Dental clinic",
+      "rating": 4.1,
+      "userRatingCount": 42,
+      "websiteUri": "https://brightsmile.example",
+      "internationalPhoneNumber": "+91 80 1234 5678",
+      "formattedAddress": "12 MG Road, Bengaluru",
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "businessStatus": "OPERATIONAL",
+      "reviews": [
+        "Good dentist but I could never get through on the phone to book an appointment.",
+        "Tried calling for two days to book, no answer. Walk-in only it seems.",
+        "Dr. Rao is great once you actually get an appointment."
+      ]
+    },
+    {
+      "place_id": "p_cityhosp",
+      "name": "City Hospital Dental Wing",
+      "primaryType": "dentist",
+      "category": "Hospital dental department",
+      "rating": 4.4,
+      "userRatingCount": 80,
+      "websiteUri": "https://cityhospital.example",
+      "internationalPhoneNumber": "+91 80 2222 3333",
+      "formattedAddress": "1 Hospital Rd, Bengaluru",
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "businessStatus": "OPERATIONAL",
+      "reviews": ["Booked easily through Practo.", "Part of the City Hospital chain."]
+    },
+    {
+      "place_id": "p_tiny",
+      "name": "Tiny Tooth Corner",
+      "primaryType": "dentist",
+      "rating": 5.0,
+      "userRatingCount": 2,
+      "websiteUri": "https://tinytooth.example",
+      "internationalPhoneNumber": "+91 80 4444 5555",
+      "businessStatus": "OPERATIONAL"
+    },
+    {
+      "place_id": "p_mega",
+      "name": "MegaDental Superchain",
+      "primaryType": "dentist",
+      "rating": 4.0,
+      "userRatingCount": 500,
+      "websiteUri": "https://megadental.example",
+      "internationalPhoneNumber": "+91 80 6666 7777",
+      "businessStatus": "OPERATIONAL"
+    },
+    {
+      "place_id": "p_nosite",
+      "name": "No Site Dental",
+      "primaryType": "dentist",
+      "rating": 4.2,
+      "userRatingCount": 30,
+      "internationalPhoneNumber": "+91 80 8888 9999",
+      "businessStatus": "OPERATIONAL"
+    },
+    {
+      "place_id": "p_closed",
+      "name": "Closed Down Dental",
+      "primaryType": "dentist",
+      "rating": 3.5,
+      "userRatingCount": 20,
+      "websiteUri": "https://closeddental.example",
+      "internationalPhoneNumber": "+91 80 1010 2020",
+      "businessStatus": "CLOSED_PERMANENTLY"
+    },
+    {
+      "place_id": "p_pizza",
+      "name": "Bella Pizza",
+      "primaryType": "restaurant",
+      "rating": 4.6,
+      "userRatingCount": 50,
+      "websiteUri": "https://bellapizza.example",
+      "internationalPhoneNumber": "+91 80 3030 4040",
+      "businessStatus": "OPERATIONAL"
+    },
+    {
+      "place_id": "p_nocontact",
+      "name": "Quiet Dental",
+      "primaryType": "dentist",
+      "rating": 4.3,
+      "userRatingCount": 25,
+      "websiteUri": "https://quietdental.example",
+      "businessStatus": "OPERATIONAL"
+    }
+  ]
+}
