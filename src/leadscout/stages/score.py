@@ -25,15 +25,31 @@ def build_prompt(lead: Lead, icp: ICPSpec) -> str:
     disq = "\n".join(f"  - {d}" for d in icp.disqualifiers) or "  (none specified)"
     reviews = "\n".join(f"  - {r}" for r in lead.reviews[:5]) or "  (none captured)"
     first_signal = icp.pain_signals[0] if icp.pain_signals else "their online presence"
-    return f"""You qualify a local business against a product ICP. Detect OBSERVABLE pain
-signals; do not vibe-check fit. Return structured JSON only.
+    site_text = (lead.site_text or "").strip()
+    site_block = (
+        site_text[:1500]
+        if site_text
+        else "(NOT AVAILABLE — the website could not be read; you have NOT seen this site.)"
+    )
+    tech_block = ", ".join(lead.detected_tech) or "none"
+    return f"""You qualify a local business as a SALES PROSPECT for a product. Detect only signals
+you can OBSERVE in the evidence below; do not vibe-check fit and do not assume. Return JSON only.
 
 [[PLACE_ID:{lead.place_id}]]
 [[FIRST_SIGNAL:{first_signal}]]
 
-PRODUCT: {icp.product}
+PRODUCT (this is what we SELL them): {icp.product}
 BUYER: {icp.buyer}
-PAIN SIGNALS TO LOOK FOR:
+
+FIT DIRECTION (critical — get this right):
+  - HIGH fit = a business that clearly HAS the pain the product solves and does NOT already have a
+    solution. Here that means a readable website that LACKS online booking (only a phone number or
+    contact form). They need what we sell.
+  - LOW fit = a business that already has the solution. If the site already has online booking,
+    they are NOT a prospect — score low. Do NOT congratulate them on having it; we are selling,
+    not auditing.
+PAIN SIGNALS TO LOOK FOR (about the WEBSITE — judge only from site_text and detected_tech below,
+never from the name or category):
 {signals}
 DISQUALIFIERS (if any present, set fit_score low and list it in disqualifiers_hit):
 {disq}
@@ -42,13 +58,31 @@ BUSINESS:
   name: {lead.name}
   category: {lead.category}
   website: {lead.website}
-  detected_tech: {", ".join(lead.detected_tech) or "none"}
-  site_text: {(lead.site_text or "")[:1500]}
+  detected_tech: {tech_block}
+  site_text: {site_block}
   reviews:
 {reviews}
 
+GROUNDING RULES (enforced — violating them is a failure):
+  - A website pain signal may be listed in detected_signals ONLY if site_text supports it. If
+    site_text is NOT AVAILABLE, you did not see the website: do NOT claim any website signal,
+    leave detected_signals empty, set fit_score <= 40, and say evidence was insufficient.
+  - detected_tech naming a booking tool (online-booking-link, online-booking-widget, Practo,
+    Zocdoc, Calendly, NexHealth) means they ALREADY have online booking: do NOT list a
+    "no online booking" signal, score LOW, and treat an external booking platform (Practo/Zocdoc)
+    as a disqualifier hit.
+  - Chain/franchise disqualifier: fire it only on clear evidence — the business name literally
+    contains a brand spelled out in a disqualifier (Apollo, Partha, Clove, ...), OR site_text
+    plainly states multi-location/franchise membership. A doctor-named or independent clinic
+    ("Dr. X Dental Care", "Smile Studio") is NOT a chain — NEVER invent "part of a larger group"
+    or any disqualifier from a missing or unremarkable site_text. When unsure, leave it empty:
+    wrongly disqualifying a real single clinic loses a good lead and is worse than missing one.
+  - detected_signals must list the OBSERVED pain (e.g. "no online booking link on the website"),
+    never a positive ("has booking"). The suggested_opener MUST reference one specific entry from
+    detected_signals in plain words, framed as an opportunity we can help with.
+
 Return JSON: fit_score (0-100), detected_signals[], disqualifiers_hit[], reasoning,
-suggested_opener. The suggested_opener MUST reference one specific detected_signal.
+suggested_opener.
 """
 
 

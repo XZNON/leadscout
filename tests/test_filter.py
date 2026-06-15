@@ -18,7 +18,7 @@ def test_filter_keeps_only_qualified(geo, niche, icp, fixture_clients):
     # Each reject is dropped for the right deterministic reason.
     reasons = {d.place_id: d.reason for d in dropped}
     assert "size_proxy" in reasons["p_tiny"]      # 2 reviews < min 5
-    assert "size_proxy" in reasons["p_mega"]      # 500 reviews > max 150
+    assert "size_proxy" in reasons["p_mega"]      # 1500 reviews > max 800 (a superchain)
     assert "website" in reasons["p_nosite"]       # require_website
     assert "operational" in reasons["p_closed"]   # permanently closed
     assert "allowlist" in reasons["p_pizza"]      # restaurant, not dentist
