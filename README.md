@@ -117,8 +117,8 @@ Current progress (see [the roadmap](docs/sessions/README.md) for detail):
 | 02 | Verify & green the skeleton | ✅ |
 | 03 | Live discovery (Google Places) | ✅ |
 | 04 | Live enrichment (scraping) | ✅ |
-| 05 | Live scoring (LLM) | ⬜ |
-| 06 | First real run & tuning | ⬜ |
+| 05 | Live scoring (LLM) | ✅ |
+| 06 | First real run & tuning | ✅ |
 | 07+ | Post-MVP backlog | ⬜ |
 
 ## Scope & legal
