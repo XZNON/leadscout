@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from .cache import JsonCache
-from .clients import AsyncHttpClient, HttpClient, LlmClient, PlacesClient
+from .clients import AsyncHttpClient, HttpClient, LlmClient, PlacesClient, SourceClient
 from .config import RunConfig
 from .models import DropRecord, GeographyInput, ICPSpec, Lead, NicheSpec
 from .stages import discover as s_discover
@@ -39,11 +39,13 @@ def run_pipeline(
     places: PlacesClient,
     http: HttpClient | AsyncHttpClient,
     llm: LlmClient,
+    extra_sources: list[SourceClient] | None = None,
 ) -> PipelineResult:
     cache = JsonCache(cfg.cache_dir)
 
-    # Stage 1 — discover (deterministic, deduped)
-    raw = s_discover.discover(geo, niche, places)
+    # Stage 1 — discover (deterministic, deduped). Extra sources (if any) merge into the same
+    # place_id + phone dedup; default-empty keeps the Places-only path identical.
+    raw = s_discover.discover(geo, niche, places, extra_sources=extra_sources)
 
     # Stage 2 — filter (deterministic, free; the cost gate before any LLM token)
     candidates, dropped = s_filter.filter_leads(raw, icp, niche)

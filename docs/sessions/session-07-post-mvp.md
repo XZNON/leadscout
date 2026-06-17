@@ -6,10 +6,19 @@ its own session when MVP (Session 06) is solid. Don't start these early — MVP 
 
 ## Candidate sessions (pick one per session, in roughly this order)
 
-### A. JustDial / IndiaMART adapters (idea.md §7 India coverage)
+### A. JustDial / IndiaMART adapters (idea.md §7 India coverage) — ✅ done
 New source clients feeding the **same** `discover` dedup step; normalize into the `Lead` shape
 with the right `source` tag. Places thins out for tier-2/3 shops — these fill the gap. Mind ToS
 and scraping etiquette.
+
+**Outcome:** `SourceClient` Protocol with fixture + live (`JustDialClient`/`IndiaMartClient`,
+JSON-LD parse, robots/rate-limit/cache) impls; raws normalize via `discover._raw_to_lead` into the
+`Lead` shape with `source` tag + synthetic `place_id` (`justdial:<id>`). They merge into the same
+`discover` dedup plus best-effort cross-source phone dedup (last-10 digits, Google Places
+canonical). Toggled as data via `NicheSpec.sources` (default Places-only; `dental.yaml` enables
+JustDial, IndiaMART off). Offline tests in `tests/test_sources.py`; `pytest` (49) green, `ruff`/
+`mypy` clean. **Live multi-source fetch is operator-gated on confirming robots.txt/ToS** (the live
+URL shapes are starting points, not verified endpoints). Items B–E remain ⬜.
 
 ### B. State-level tiling (idea.md §7)
 Today city→bbox→tiles works; extend to `state` with smarter tile subdivision when a `(tile,

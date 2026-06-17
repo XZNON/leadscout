@@ -7,7 +7,7 @@ cross-stage change.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -49,6 +49,10 @@ class GeographyInput(BaseModel):
 class NicheSpec(BaseModel):
     keywords: list[str] = Field(min_length=1)
     place_type_allowlist: list[str] = Field(default_factory=list)
+    # Which discovery directories cover this vertical/geography. Config-as-data: enabling a source
+    # is a YAML edit, no code change. Default is Places-only so existing runs are unchanged. Entries
+    # are validated against the Source literal (a typo'd source raises at load).
+    sources: list[Source] = Field(default_factory=lambda: cast("list[Source]", ["google_places"]))
 
 
 class SizeProxy(BaseModel):

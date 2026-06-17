@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import math
 
-from ..clients import PlacesClient
-from ..models import BBox, GeographyInput, Lead, NicheSpec, Point, Tile
+from ..clients import PlacesClient, SourceClient
+from ..models import BBox, GeographyInput, Lead, NicheSpec, Point, Source, Tile
 
 PLACES_RADIUS_CAP_KM = 50.0
 _DEFAULT_TILE_RADIUS_KM = 40.0  # overlap headroom under the 50 km cap
@@ -57,13 +57,28 @@ def _tile_bbox(bbox: BBox, radius_km: float = _DEFAULT_TILE_RADIUS_KM) -> list[T
     return tiles or [Tile(lat=mid_lat, lng=(bbox.min_lng + bbox.max_lng) / 2, radius_km=radius_km)]
 
 
-def _raw_to_lead(raw: dict) -> Lead:
-    """Normalize a raw Places result into the common Lead shape."""
+def _norm_phone(s: str | None) -> str | None:
+    """Last-10-digits phone key for cross-source dedup. `None` if <10 digits (no key)."""
+    if not s:
+        return None
+    digits = "".join(c for c in s if c.isdigit())
+    return digits[-10:] if len(digits) >= 10 else None
+
+
+def _raw_to_lead(raw: dict, source: Source = "google_places") -> Lead:
+    """Normalize a raw source result into the common Lead shape.
+
+    Places carry a real `place_id`; other directories have none, so we synthesize a namespaced,
+    collision-free id (`f"{source}:{listing_id}"`) — still a `str`, the `Lead.place_id` contract is
+    intact. The field-aliasing below already spans both Places (`websiteUri`/`internationalPhone…`)
+    and the plain directory keys, so this stays the single normalization choke point.
+    """
     website = raw.get("website") or raw.get("websiteUri")
+    place_id = raw["place_id"] if source == "google_places" else f"{source}:{raw['listing_id']}"
     return Lead(
-        place_id=raw["place_id"],
+        place_id=place_id,
         name=raw.get("name", raw.get("displayName", "")) or "",
-        source="google_places",
+        source=source,
         category=raw.get("category") or raw.get("primaryType"),
         place_type=raw.get("place_type") or raw.get("primaryType"),
         address=raw.get("address") or raw.get("formattedAddress"),
@@ -79,10 +94,30 @@ def _raw_to_lead(raw: dict) -> Lead:
     )
 
 
-def discover(geo: GeographyInput, niche: NicheSpec, client: PlacesClient) -> list[Lead]:
-    """Run the full discovery loop and return leads deduped on place_id."""
+def discover(
+    geo: GeographyInput,
+    niche: NicheSpec,
+    client: PlacesClient,
+    extra_sources: list[SourceClient] | None = None,
+) -> list[Lead]:
+    """Run the full discovery loop and return leads deduped on place_id.
+
+    Google Places is canonical and collected first (tiling unchanged). Extra directory sources
+    (JustDial/IndiaMART) are merged after, into the SAME `by_id` dedup, with two gates: (a) skip a
+    duplicate `place_id` (in-source dedup, unchanged); (b) skip a lead whose normalized phone is
+    already held (cross-source dedup — earlier/Places record wins). Phone-less leads fall back to
+    place_id only (no cross-source merge); Stage 2 drops them anyway. Default `extra_sources` is
+    empty, so existing Places-only callers are byte-identical (idea.md §10).
+    """
     tiles = resolve_tiles(geo, client)
     by_id: dict[str, Lead] = {}
+    seen_phones: dict[str, str] = {}  # norm_phone -> owning place_id (first wins, Places canonical)
+
+    def _claim_phone(lead: Lead) -> None:
+        np = _norm_phone(lead.phone)
+        if np and np not in seen_phones:
+            seen_phones[np] = lead.place_id
+
     for tile in tiles:
         for keyword in niche.keywords:
             for raw in client.search(tile.lat, tile.lng, tile.radius_km, keyword):
@@ -90,5 +125,18 @@ def discover(geo: GeographyInput, niche: NicheSpec, client: PlacesClient) -> lis
                 if not pid:
                     continue
                 if pid not in by_id:  # dedup on place_id — mandatory (idea.md §10)
-                    by_id[pid] = _raw_to_lead(raw)
+                    lead = _raw_to_lead(raw)
+                    by_id[pid] = lead
+                    _claim_phone(lead)
+
+    for source in extra_sources or []:
+        for raw in source.discover(geo, niche):
+            lead = _raw_to_lead(raw, source=source.source_name)
+            if lead.place_id in by_id:
+                continue  # in-source / namespaced-id dedup
+            if (np := _norm_phone(lead.phone)) is not None and np in seen_phones:
+                continue  # cross-source phone collision — canonical record already kept
+            by_id[lead.place_id] = lead
+            _claim_phone(lead)
+
     return list(by_id.values())

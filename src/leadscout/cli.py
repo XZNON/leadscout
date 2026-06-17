@@ -22,10 +22,14 @@ from .clients import (
     LivePlacesClient,
     LlmClient,
     PlacesClient,
+    SourceClient,
     load_fixture_clients,
+    load_fixture_sources,
+    load_live_sources,
 )
 from .config import RunConfig, load_geography, load_icp, load_niche, require_key
 from .io_out import write_outputs
+from .models import Source
 from .pipeline import run_pipeline
 
 app = typer.Typer(add_completion=False, help="LeadScout — local lead discovery & qualification.")
@@ -51,23 +55,32 @@ def run(
         offline=offline, max_score=(0 if no_score else max_score), out_dir=Path(out_dir)
     )
 
+    # Extra discovery sources are config-as-data: enabled per niche YAML (Places always canonical).
+    extra: list[Source] = [s for s in niche_spec.sources if s != "google_places"]
+
     places: PlacesClient
     http: HttpClient | AsyncHttpClient
     llm: LlmClient
+    sources: list[SourceClient]
     if offline:
         places, http, llm = load_fixture_clients(FIXTURES_DIR)
+        sources = list(load_fixture_sources(FIXTURES_DIR, extra))
     else:
+        cache = JsonCache(cfg.cache_dir)
         places = LivePlacesClient(
             require_key("GOOGLE_MAPS_API_KEY"),
-            cache=JsonCache(cfg.cache_dir),
+            cache=cache,
             timeout_s=cfg.request_timeout_s,
         )
         http = LiveHttpClient(
             timeout_s=cfg.request_timeout_s, max_concurrency=cfg.max_concurrency
         )
         llm = LiveLlmClient(require_key("OPENAI_API_KEY"))
+        sources = load_live_sources(extra, cache=cache, timeout_s=cfg.request_timeout_s)
 
-    result = run_pipeline(geography, niche_spec, icp_spec, cfg, places, http, llm)
+    result = run_pipeline(
+        geography, niche_spec, icp_spec, cfg, places, http, llm, extra_sources=sources
+    )
     paths = write_outputs(result.leads, result.dropped, cfg.out_dir)
 
     typer.echo(

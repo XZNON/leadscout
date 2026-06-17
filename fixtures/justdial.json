@@ -1,0 +1,26 @@
+[
+  {
+    "listing_id": "jd_neighbour",
+    "name": "Neighbourhood Dental Care",
+    "phone": "098450-67890",
+    "address": "45 4th Block, Jayanagar, Bengaluru",
+    "website": "https://neighbourhooddental.example",
+    "category": "Dental Clinic"
+  },
+  {
+    "listing_id": "jd_bright_dup",
+    "name": "Bright Smile Dental Clinic",
+    "phone": "080-1234-5678",
+    "address": "12 MG Road, Bengaluru",
+    "website": "https://brightsmile.example",
+    "category": "Dentist"
+  },
+  {
+    "listing_id": "jd_smileworks",
+    "name": "SmileWorks Orthodontics",
+    "phone": "+91 99001 22334",
+    "address": "9 100ft Road, Indiranagar, Bengaluru",
+    "website": "https://smileworks.example",
+    "category": "Orthodontist"
+  }
+]

@@ -14,17 +14,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from urllib.robotparser import RobotFileParser
 
 import httpx
 from openai import OpenAI
 
 from .cache import JsonCache
-from .models import BBox, ScoreResult
+from .models import BBox, GeographyInput, NicheSpec, ScoreResult, Source
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,198 @@ class LivePlacesClient:
     def _normalize(p: dict) -> dict:
         """Shape a New-API place for `discover._raw_to_lead` (stable contract — do not edit it)."""
         return {**p, "place_id": p["id"], "name": (p.get("displayName") or {}).get("text", "")}
+
+
+# =========================================================================== extra sources
+#
+# Additional discovery directories (JustDial, IndiaMART) that feed the SAME Stage-1 dedup. They
+# return RAW dicts (not Leads) so `discover._raw_to_lead` stays the single normalization choke
+# point. Google Places stays canonical and is NOT forced under this Protocol — it has its own
+# tiling-specific surface (`geocode_bbox`/`search`); these extra sources just search by city text.
+
+
+class SourceClient(Protocol):
+    """An extra discovery directory. `discover` returns raw listing dicts with a `listing_id`."""
+
+    source_name: Source
+
+    def discover(self, geo: GeographyInput, niche: NicheSpec) -> list[dict]: ...
+
+
+class FixtureSourceClient:
+    """Serves recorded directory listings from a fixture file. Zero network.
+
+    Fixture shape (fixtures/<source>.json): a JSON list of listing dicts, each with at least
+    `listing_id` plus the usual `name`/`phone`/`address`/`website?`/`category`. The same listings
+    are returned for any geo/niche so dedup + tagging logic is exercised deterministically.
+    """
+
+    def __init__(self, source_name: Source, fixture_path: str | Path) -> None:
+        self.source_name = source_name
+        self._data: list[dict] = json.loads(Path(fixture_path).read_text(encoding="utf-8"))
+
+    def discover(self, geo: GeographyInput, niche: NicheSpec) -> list[dict]:
+        return list(self._data)
+
+
+class _LiveDirectoryClient:
+    """Shared live HTML-directory adapter (JustDial / IndiaMART have the same shape).
+
+    Etiquette, not gold-plating (CLAUDE.md §5): real User-Agent, robots.txt honored per host, a
+    minimum interval between requests (single-threaded, so concurrency is inherently 1), and a
+    cache by synthetic `place_id` namespace so re-runs don't refetch. The `client` param is the
+    offline test seam: inject `httpx.Client(transport=httpx.MockTransport(...))`.
+
+    ⚠️ The search URL shape below is a STARTING POINT, not a verified endpoint. JustDial/IndiaMART
+    ToS and anti-bot must be confirmed before any live fetch (see step07 Risks). If a site
+    disallows automated access, this adapter still exists and is offline-tested; the live path is
+    operator-discretion and may require an official API / partner feed instead.
+    """
+
+    source_name: Source
+    SEARCH_URL_TEMPLATE: str  # "{base}/...{city}...{keyword}..."
+    USER_AGENT = "LeadScoutBot/0.1 (+internal lead research; respects robots.txt)"
+
+    def __init__(
+        self,
+        cache: JsonCache | None = None,
+        timeout_s: float = 10.0,
+        min_interval_s: float = 1.0,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self._cache = cache
+        self._min_interval_s = min_interval_s
+        self._last_fetch = 0.0
+        self._http = client or httpx.Client(
+            timeout=timeout_s, follow_redirects=True, headers={"User-Agent": self.USER_AGENT}
+        )
+        self._robots: dict[str, RobotFileParser | None] = {}
+
+    def discover(self, geo: GeographyInput, niche: NicheSpec) -> list[dict]:
+        city = geo.city or geo.state or ""
+        ns = self.source_name
+        raws: list[dict] = []
+        seen: set[str] = set()
+        for keyword in niche.keywords:
+            key = f"{city}|{keyword}".lower()
+            if self._cache is not None and self._cache.has(f"{ns}_pages", key):
+                cached = self._cache.get(f"{ns}_pages", key) or []
+                page_raws = list(cached)
+            else:
+                html = self._fetch(self._search_url(city, keyword))
+                page_raws = self._parse_listings(html) if html else []
+                if self._cache is not None:
+                    self._cache.set(f"{ns}_pages", key, page_raws)
+                    for r in page_raws:
+                        self._cache.set(ns, str(r.get("listing_id")), r)
+            for r in page_raws:
+                lid = str(r.get("listing_id"))
+                if lid and lid not in seen:
+                    seen.add(lid)
+                    raws.append(r)
+        return raws
+
+    def _search_url(self, city: str, keyword: str) -> str:
+        return self.SEARCH_URL_TEMPLATE.format(city=quote(city), keyword=quote(keyword))
+
+    def _fetch(self, url: str) -> str | None:
+        if not self._robots_allows(url):
+            logger.warning("%s: robots.txt disallows %s — skipping.", self.source_name, url)
+            return None
+        wait = self._min_interval_s - (time.monotonic() - self._last_fetch)
+        if wait > 0:
+            time.sleep(wait)  # pragma: no cover - live-only rate limit
+        try:
+            resp = self._http.get(url)
+        except httpx.HTTPError as exc:  # pragma: no cover - live-only network error
+            logger.warning("%s: fetch failed for %s: %s", self.source_name, url, exc)
+            return None
+        finally:
+            self._last_fetch = time.monotonic()
+        return resp.text if resp.is_success else None
+
+    def _robots_allows(self, url: str) -> bool:
+        parts = urlsplit(url)
+        host = parts.netloc
+        if host not in self._robots:
+            rp = RobotFileParser()
+            try:
+                r = self._http.get(f"{parts.scheme}://{host}/robots.txt")
+                rp.parse(r.text.splitlines()) if r.is_success else rp.parse([])
+                self._robots[host] = rp
+            except httpx.HTTPError:  # pragma: no cover - indeterminate robots → be polite
+                self._robots[host] = None
+        rp_cached = self._robots[host]
+        return rp_cached.can_fetch(self.USER_AGENT, url) if rp_cached is not None else False
+
+    def _parse_listings(self, html: str) -> list[dict]:
+        """Tolerant parse of embedded JSON-LD LocalBusiness nodes → raw dicts.
+
+        Leaning on schema.org JSON-LD (rather than CSS selectors) keeps the parser stable across
+        markup churn — a live break is then isolated and obvious. Selectors stay minimal.
+        """
+        raws: list[dict] = []
+        for block in re.findall(
+            r"<script[^>]+application/ld\+json[^>]*>(.*?)</script>", html, re.DOTALL | re.IGNORECASE
+        ):
+            try:
+                data = json.loads(block)
+            except json.JSONDecodeError:
+                continue
+            for node in _iter_localbusiness(data):
+                raw = _node_to_raw(node)
+                if raw.get("listing_id"):
+                    raws.append(raw)
+        return raws
+
+
+class JustDialClient(_LiveDirectoryClient):
+    source_name: Source = "justdial"
+    # Starting point only — confirm robots.txt/ToS before any live fetch (see _LiveDirectoryClient).
+    SEARCH_URL_TEMPLATE = "https://www.justdial.com/{city}/{keyword}"
+
+
+class IndiaMartClient(_LiveDirectoryClient):
+    source_name: Source = "indiamart"
+    # IndiaMART is B2B supplier-oriented — low yield for local-clinic ICPs; off by default in YAML.
+    SEARCH_URL_TEMPLATE = "https://dir.indiamart.com/search.mp?ss={keyword}&cq={city}"
+
+
+def _iter_localbusiness(data: Any) -> list[dict]:
+    """Walk a JSON-LD blob and yield LocalBusiness-ish nodes (handles @graph and lists)."""
+    out: list[dict] = []
+    if isinstance(data, list):
+        for item in data:
+            out.extend(_iter_localbusiness(item))
+    elif isinstance(data, dict):
+        if "@graph" in data:
+            out.extend(_iter_localbusiness(data["@graph"]))
+        type_ = data.get("@type", "")
+        types = type_ if isinstance(type_, list) else [type_]
+        wanted = ("Business", "Organization", "Store")
+        if any(any(w in str(t) for w in wanted) for t in types):
+            out.append(data)
+    return out
+
+
+def _node_to_raw(node: dict) -> dict:
+    """Map a JSON-LD LocalBusiness node into the raw dict `discover._raw_to_lead` consumes."""
+    addr = node.get("address")
+    address = addr.get("streetAddress") if isinstance(addr, dict) else addr
+    listing_id = node.get("@id") or node.get("url") or node.get("name") or ""
+    return {
+        "listing_id": _slug(str(listing_id)),
+        "name": node.get("name"),
+        "phone": node.get("telephone"),
+        "website": node.get("url"),
+        "address": address,
+        "category": node.get("@type"),
+    }
+
+
+def _slug(s: str) -> str:
+    """Stable, filename/dedup-safe id from a URL or name."""
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
 
 
 # =========================================================================== HTTP (scrape)
@@ -473,6 +666,32 @@ def load_fixture_clients(
         FixtureHttpClient(d / "scrapes"),
         FixtureLlmClient(d / "llm_scores.json"),
     )
+
+
+# Extra (non-Places) sources and the fixture file each reads. Places is canonical and wired
+# separately, so it is intentionally absent here.
+_SOURCE_FIXTURES: dict[Source, str] = {"justdial": "justdial.json", "indiamart": "indiamart.json"}
+
+
+def load_fixture_sources(
+    fixtures_dir: str | Path, sources: list[Source]
+) -> list[FixtureSourceClient]:
+    """Build offline fixture clients for the enabled non-Places sources (config-as-data toggle)."""
+    d = Path(fixtures_dir)
+    return [
+        FixtureSourceClient(s, d / _SOURCE_FIXTURES[s]) for s in sources if s in _SOURCE_FIXTURES
+    ]
+
+
+def load_live_sources(
+    sources: list[Source], cache: JsonCache | None = None, timeout_s: float = 10.0
+) -> list[SourceClient]:
+    """Build live clients for the enabled non-Places sources. Places is wired separately."""
+    live: dict[Source, type[_LiveDirectoryClient]] = {
+        "justdial": JustDialClient,
+        "indiamart": IndiaMartClient,
+    }
+    return [live[s](cache=cache, timeout_s=timeout_s) for s in sources if s in live]
 
 
 def to_serializable(obj: Any) -> Any:
