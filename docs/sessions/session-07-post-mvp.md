@@ -31,9 +31,18 @@ Fixture client reads `saturated_keywords` flag. `examples/karnataka.yaml` added.
 (subdivision geometry, saturation signal, depth cap, dedup-under-overlap, state-YAML end-to-end,
 regression guard); 61 total pytest green; ruff/mypy clean; offline state smoke run passes.
 
-### C. Owner-name enrichment (idea.md §12.3)
+### C. Owner-name enrichment (idea.md §12.3) — ✅ done
 Best-effort decision-maker name beyond what the homepage gives. LinkedIn is fragile/ToS-sensitive
 — decide how hard to try vs. accept business-level contact. Don't build anything that violates ToS.
+
+**Outcome:** Stage 3 now extracts `owner_name` from homepage + on-site candidate pages (`/about`,
+`/about-us`, `/team`, `/contact`) using two patterns: `_OWNER_LABEL_RE` ("Owner/Founder/Proprietor:
+Name") and the existing `_OWNER_RE` ("Dr. Name"). `_best_owner` tries label form first, returns
+`None` on no match — never guesses. Extra page fetches obey the same robots/rate-limit/cache path
+as the homepage and fold into the single per-`place_id` cache entry (warm runs = zero fetches).
+Off-site/LinkedIn lookup explicitly declined on ToS + fragility grounds; reasoning recorded in code
+and `Implementations/step07C.md`. Zero LLM added. 9 enrich tests green; ruff/mypy clean; offline
+smoke run passes. Items D–E remain ⬜.
 
 ### D. SQLite for cross-run dedup & state (idea.md §12.4)
 Move from flat-file cache + CSV to a lightweight local SQLite DB so dedup and lead state persist

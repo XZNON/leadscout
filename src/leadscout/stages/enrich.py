@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from urllib.parse import urljoin
 
 from ..cache import JsonCache
 from ..clients import AsyncHttpClient, HttpClient
@@ -27,7 +28,41 @@ _TECH_MARKERS = {
     "book now": "online-booking-widget",
     "/book": "online-booking-link",
 }
+# "Dr./Doctor <Name>" — homepage path, kept for backward compatibility.
 _OWNER_RE = re.compile(r"\b(?:Dr\.?|Doctor)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})")
+# Explicit role label followed by a name, e.g. "Owner: Ramesh Gupta" or "Proprietor — Sunita Mehta".
+_OWNER_LABEL_RE = re.compile(
+    r"\b(?:Owner|Founder|Co-?[Ff]ounder|Proprietor|Principal(?:\s+Dentist)?"
+    r"|Managing\s+Director|Director)\b\s*[:\-—]?\s+(?:Dr\.?\s+)?"
+    r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})"
+)
+
+
+def _best_owner(text: str) -> str | None:
+    """Try role-label form first, then Dr./Doctor form. Return None on no match — never guess.
+
+    On-site only by design; off-site/LinkedIn lookup declined on ToS + fragility grounds
+    — see Implementations/step07C.
+    """
+    m = _OWNER_LABEL_RE.search(text)
+    if m:
+        return m.group(1)
+    m = _OWNER_RE.search(text)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _candidate_pages(homepage_url: str) -> list[str]:
+    """Return homepage + fixed on-site candidate paths, deduped, homepage first."""
+    seen = {homepage_url}
+    pages = [homepage_url]
+    for path in ("/about", "/about-us", "/team", "/contact"):
+        url = urljoin(homepage_url, path)
+        if url not in seen:
+            seen.add(url)
+            pages.append(url)
+    return pages
 
 
 def _strip_html(html: str) -> str:
@@ -74,6 +109,16 @@ def enrich_lead(lead: Lead, http: HttpClient, cache: JsonCache) -> Lead:
             html = http.fetch(lead.website)
             if html:
                 cached = _extract(html)
+        # If the homepage didn't yield an owner name, try on-site candidate pages.
+        if not cached.get("owner_name") and lead.website:
+            for url in _candidate_pages(lead.website)[1:]:
+                if http.robots_allows(url):
+                    extra_html = http.fetch(url)
+                    if extra_html:
+                        name = _best_owner(_strip_html(extra_html))
+                        if name:
+                            cached["owner_name"] = name
+                            break
         cache.set("enrich", lead.place_id, cached)
 
     return _merge(lead, cached)
@@ -99,6 +144,15 @@ async def enrich_async(
                 html = await http.fetch(lead.website)
                 if html:
                     cached = _extract(html)
+            if not cached.get("owner_name") and lead.website:
+                for url in _candidate_pages(lead.website)[1:]:
+                    if await http.robots_allows(url):
+                        extra_html = await http.fetch(url)
+                        if extra_html:
+                            name = _best_owner(_strip_html(extra_html))
+                            if name:
+                                cached["owner_name"] = name
+                                break
             cache.set("enrich", lead.place_id, cached)
         return _merge(lead, cached)
 
