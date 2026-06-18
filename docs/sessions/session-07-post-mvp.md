@@ -44,9 +44,20 @@ Off-site/LinkedIn lookup explicitly declined on ToS + fragility grounds; reasoni
 and `Implementations/step07C.md`. Zero LLM added. 9 enrich tests green; ruff/mypy clean; offline
 smoke run passes. Items D–E remain ⬜.
 
-### D. SQLite for cross-run dedup & state (idea.md §12.4)
+### D. SQLite for cross-run dedup & state (idea.md §12.4) — ✅ done
 Move from flat-file cache + CSV to a lightweight local SQLite DB so dedup and lead state persist
 across sessions/runs. Keep CSV/JSONL export.
+
+**Outcome:** `LeadStore` (`src/leadscout/store.py`, stdlib `sqlite3`) persists a `leads` table
+keyed on `place_id` with state (`new`/`seen`/`contacted`). Sits **alongside** the kept `JsonCache`
+(raw HTTP bodies) — two stores, two responsibilities. `upsert_seen` bumps `new`→`seen` on
+re-encounter; `contacted` is sticky. `Lead.lead_state` carries the per-run DB state (additive field,
+default `None`). `PipelineResult` gains `new_count`/`seen_count`. `RunConfig.db_path` (default
+`.cache/leadscout.db`) threads through CLI as `--db`. `leadscout mark <place_id> <state>` added for
+operator-driven state advancement. `lead_state` column added to CSV. 9 new tests (`test_store.py`
++ extended `test_pipeline.py`; all temp-path, zero network); 76 pytest green; ruff/mypy clean.
+Run-twice offline smoke proves cross-run state: run 1 `new=10 seen=0`, run 2 `new=0 seen=10`.
+Item E remains ⬜.
 
 ### E. Opener format variants (idea.md §12.5)
 Call-script vs email vs WhatsApp opener templates, selectable per run. Still grounded in detected

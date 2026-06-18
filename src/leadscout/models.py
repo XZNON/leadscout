@@ -12,6 +12,7 @@ from typing import Literal, cast
 from pydantic import BaseModel, Field, model_validator
 
 Source = Literal["google_places", "justdial", "indiamart"]
+LeadState = Literal["new", "seen", "contacted"]
 
 
 # --------------------------------------------------------------------------- inputs
@@ -136,6 +137,9 @@ class Lead(BaseModel):
     disqualifiers_hit: list[str] = Field(default_factory=list)
     reasoning: str | None = None
     suggested_opener: str | None = None
+
+    # --- cross-run store (display only; not a Stage contract) ---
+    lead_state: LeadState | None = None
 
     @property
     def contactable(self) -> bool:

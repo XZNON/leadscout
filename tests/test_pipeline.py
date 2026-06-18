@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import csv
+import json
 
 from leadscout.config import RunConfig
 from leadscout.io_out import write_outputs
 from leadscout.pipeline import run_pipeline
+from leadscout.store import LeadStore
 
 
 def test_walking_skeleton(geo, niche, icp, fixture_clients, tmp_path):
@@ -49,3 +51,61 @@ def test_walking_skeleton(geo, niche, icp, fixture_clients, tmp_path):
 
     # Audit file holds the deterministic Stage-2 rejects.
     assert len(result.dropped) == 6
+
+
+def test_pipeline_records_leads_in_store(geo, niche, icp, fixture_clients, tmp_path):
+    places, http, llm = fixture_clients
+    db = tmp_path / "leadscout.db"
+    cfg = RunConfig(
+        offline=True, cache_dir=tmp_path / "cache", out_dir=tmp_path / "out", db_path=db
+    )
+
+    result = run_pipeline(geo, niche, icp, cfg, places, http, llm)
+
+    assert result.new_count == result.raw_count
+    assert result.seen_count == 0
+
+    with LeadStore(db) as store:
+        assert store.get_state("p_bright") == "new"
+
+
+def test_pipeline_cross_run_seen(geo, niche, icp, fixture_clients, tmp_path):
+    places, http, llm = fixture_clients
+    db = tmp_path / "leadscout.db"
+    cfg = RunConfig(
+        offline=True, cache_dir=tmp_path / "cache", out_dir=tmp_path / "out", db_path=db
+    )
+
+    run_pipeline(geo, niche, icp, cfg, places, http, llm)
+    result2 = run_pipeline(geo, niche, icp, cfg, places, http, llm)
+
+    # Second run: all place_ids already in DB -> all seen
+    assert result2.seen_count == result2.raw_count
+    assert result2.new_count == 0
+    # Stage counts unchanged — seen leads are flagged but NOT dropped
+    assert result2.raw_count == 8
+    assert result2.candidate_count == 2
+    assert result2.scored_count == 2
+
+
+def test_pipeline_export_with_lead_state(geo, niche, icp, fixture_clients, tmp_path):
+    places, http, llm = fixture_clients
+    db = tmp_path / "store.db"
+    cfg = RunConfig(
+        offline=True, cache_dir=tmp_path / "cache", out_dir=tmp_path / "out", db_path=db
+    )
+
+    result = run_pipeline(geo, niche, icp, cfg, places, http, llm)
+    paths = write_outputs(result.leads, result.dropped, cfg.out_dir)
+
+    assert paths["csv"].exists() and paths["jsonl"].exists() and paths["disqualified"].exists()
+
+    with paths["csv"].open(encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        assert "lead_state" in (reader.fieldnames or [])
+        rows = list(reader)
+    assert rows[0]["lead_state"] in ("new", "seen", "contacted")
+
+    with paths["jsonl"].open(encoding="utf-8") as f:
+        top_row = json.loads(f.readline())
+    assert "lead_state" in top_row

@@ -12,7 +12,7 @@ CSV_COLUMNS = [
     "fit_score", "name", "phone", "email", "owner_name", "website",
     "category", "address", "city", "rating", "review_count",
     "detected_signals", "disqualifiers_hit", "suggested_opener", "reasoning",
-    "place_id", "source",
+    "place_id", "source", "lead_state",
 ]
 
 

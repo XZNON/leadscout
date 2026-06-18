@@ -18,6 +18,7 @@ from .stages import discover as s_discover
 from .stages import enrich as s_enrich
 from .stages import filter as s_filter
 from .stages import score as s_score
+from .store import LeadStore
 
 
 @dataclass
@@ -29,6 +30,8 @@ class PipelineResult:
     scored_count: int = 0
     llm_calls: int = 0
     spent_usd: float = 0.0
+    new_count: int = 0
+    seen_count: int = 0
 
 
 def run_pipeline(
@@ -46,6 +49,19 @@ def run_pipeline(
     # Stage 1 — discover (deterministic, deduped). Extra sources (if any) merge into the same
     # place_id + phone dedup; default-empty keeps the Places-only path identical.
     raw = s_discover.discover(geo, niche, places, extra_sources=extra_sources)
+
+    # Cross-run store: stamp each place_id, stamp lead_state (new/seen/contacted), track counts.
+    new_count = 0
+    seen_count = 0
+    store = LeadStore(cfg.db_path)
+    try:
+        states = store.upsert_seen(raw)
+        for lead in raw:
+            lead.lead_state = states[lead.place_id]
+        new_count = sum(1 for s in states.values() if s == "new")
+        seen_count = sum(1 for s in states.values() if s == "seen")
+    finally:
+        store.close()
 
     # Stage 2 — filter (deterministic, free; the cost gate before any LLM token)
     candidates, dropped = s_filter.filter_leads(raw, icp, niche)
@@ -70,4 +86,6 @@ def run_pipeline(
         scored_count=len(scored),
         llm_calls=llm.call_count,
         spent_usd=llm.spent_usd,
+        new_count=new_count,
+        seen_count=seen_count,
     )

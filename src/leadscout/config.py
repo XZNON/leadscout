@@ -25,6 +25,7 @@ class RunConfig(BaseModel):
     offline: bool = False  # wire fixture clients instead of live APIs
     out_dir: Path = Path("out")
     cache_dir: Path = Path(".cache")
+    db_path: Path = Path(".cache/leadscout.db")
     # Stage 3 politeness
     max_concurrency: int = 5
     request_timeout_s: float = 10.0
