@@ -1,5 +1,6 @@
 {
   "bbox": { "min_lat": 12.95, "min_lng": 77.58, "max_lat": 12.99, "max_lng": 77.62 },
+  "saturated_keywords": [],
   "results": [
     {
       "place_id": "p_bright",

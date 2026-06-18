@@ -20,9 +20,16 @@ JustDial, IndiaMART off). Offline tests in `tests/test_sources.py`; `pytest` (49
 `mypy` clean. **Live multi-source fetch is operator-gated on confirming robots.txt/ToS** (the live
 URL shapes are starting points, not verified endpoints). Items B–E remain ⬜.
 
-### B. State-level tiling (idea.md §7)
+### B. State-level tiling (idea.md §7) — ✅ done
 Today city→bbox→tiles works; extend to `state` with smarter tile subdivision when a `(tile,
 keyword)` exceeds the 60-result cap (the hook is noted in `discover.resolve_tiles`).
+
+**Outcome:** `SearchPage(results, saturated)` return from `PlacesClient.search`; `_subdivide`
+splits a saturated tile into 4 half-radius sub-tiles; `discover.discover` drives subdivision via a
+work queue, bounded by `MAX_SUBDIVIDE_DEPTH=2` and `MAX_TILES=2000`. `Tile.depth` tracks recursion.
+Fixture client reads `saturated_keywords` flag. `examples/karnataka.yaml` added. 12 new tests
+(subdivision geometry, saturation signal, depth cap, dedup-under-overlap, state-YAML end-to-end,
+regression guard); 61 total pytest green; ruff/mypy clean; offline state smoke run passes.
 
 ### C. Owner-name enrichment (idea.md §12.3)
 Best-effort decision-maker name beyond what the homepage gives. LinkedIn is fragile/ToS-sensitive

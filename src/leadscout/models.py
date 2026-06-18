@@ -91,6 +91,14 @@ class Tile(BaseModel):
     lat: float
     lng: float
     radius_km: float = Field(gt=0, le=50)
+    depth: int = 0  # subdivision depth; 0 = top-level tile from initial grid
+
+
+class SearchPage(BaseModel):
+    """Return value of PlacesClient.search — results plus a saturation signal."""
+
+    results: list[dict] = Field(default_factory=list)
+    saturated: bool = False  # True when the ~60-result/3-page cap was hit with more available
 
 
 # --------------------------------------------------------------------------- the Lead

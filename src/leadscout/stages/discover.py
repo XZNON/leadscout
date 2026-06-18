@@ -6,26 +6,33 @@ Deterministic, zero LLM. Handles the Places reality (idea.md §7/§10): ~60 resu
 
 from __future__ import annotations
 
+import logging
 import math
+from collections import deque
 
 from ..clients import PlacesClient, SourceClient
 from ..models import BBox, GeographyInput, Lead, NicheSpec, Point, Source, Tile
 
+logger = logging.getLogger(__name__)
+
 PLACES_RADIUS_CAP_KM = 50.0
 _DEFAULT_TILE_RADIUS_KM = 40.0  # overlap headroom under the 50 km cap
 _KM_PER_DEG_LAT = 111.0
+MAX_SUBDIVIDE_DEPTH = 2   # at most 4**2 = 16 sub-tiles per saturated top tile
+MAX_TILES = 2000          # hard safety ceiling on total (tile, keyword) searches per run
 
 
 def resolve_tiles(geo: GeographyInput, client: PlacesClient) -> list[Tile]:
-    """Turn any GeographyInput into a list of <=50 km circular tiles."""
+    """Turn any GeographyInput into a list of <=50 km circular tiles.
+
+    Produces the initial grid only. Saturation-driven subdivision is handled in
+    discover.discover's search loop, where per-(tile,keyword) results are actually visible.
+    """
     if geo.point is not None:
         p: Point = geo.point
         return [Tile(lat=p.lat, lng=p.lng, radius_km=min(p.radius_km, PLACES_RADIUS_CAP_KM))]
 
     if geo.bbox is not None:
-        # TODO(saturation): when a (tile,keyword) saturates the 60-result/3-page cap (logged by
-        # LivePlacesClient.search), subdivide that tile / narrow the keyword here. Not implemented
-        # this step — see Session 03 plan §5.
         return _tile_bbox(geo.bbox)
 
     # city / state -> geocode to a bbox -> tile it
@@ -55,6 +62,29 @@ def _tile_bbox(bbox: BBox, radius_km: float = _DEFAULT_TILE_RADIUS_KM) -> list[T
             lng += step_lng
         lat += step_lat
     return tiles or [Tile(lat=mid_lat, lng=(bbox.min_lng + bbox.max_lng) / 2, radius_km=radius_km)]
+
+
+def _subdivide(tile: Tile) -> list[Tile]:
+    """Split one tile into 4 overlapping quadrant sub-tiles at half the parent radius.
+
+    Centers are offset by half the parent radius in each cardinal direction, using the same
+    lat/lng-per-km math as _tile_bbox. Child radius is parent/2; stays under the 50 km cap since
+    _DEFAULT_TILE_RADIUS_KM (40 km) → 20 km → 10 km, all well below PLACES_RADIUS_CAP_KM.
+    """
+    r = tile.radius_km / 2
+    km_per_deg_lng = _KM_PER_DEG_LAT * max(math.cos(math.radians(tile.lat)), 0.01)
+    d_lat = r / _KM_PER_DEG_LAT
+    d_lng = r / km_per_deg_lng
+    child_depth = tile.depth + 1
+    def _t(lat: float, lng: float) -> Tile:
+        return Tile(lat=round(lat, 6), lng=round(lng, 6), radius_km=r, depth=child_depth)
+
+    return [
+        _t(tile.lat + d_lat, tile.lng + d_lng),
+        _t(tile.lat + d_lat, tile.lng - d_lng),
+        _t(tile.lat - d_lat, tile.lng + d_lng),
+        _t(tile.lat - d_lat, tile.lng - d_lng),
+    ]
 
 
 def _norm_phone(s: str | None) -> str | None:
@@ -110,6 +140,7 @@ def discover(
     empty, so existing Places-only callers are byte-identical (idea.md §10).
     """
     tiles = resolve_tiles(geo, client)
+    logger.debug("Initial tile grid: %d tiles for %d keywords.", len(tiles), len(niche.keywords))
     by_id: dict[str, Lead] = {}
     seen_phones: dict[str, str] = {}  # norm_phone -> owning place_id (first wins, Places canonical)
 
@@ -118,16 +149,30 @@ def discover(
         if np and np not in seen_phones:
             seen_phones[np] = lead.place_id
 
-    for tile in tiles:
-        for keyword in niche.keywords:
-            for raw in client.search(tile.lat, tile.lng, tile.radius_km, keyword):
-                pid = raw.get("place_id")
-                if not pid:
-                    continue
-                if pid not in by_id:  # dedup on place_id — mandatory (idea.md §10)
-                    lead = _raw_to_lead(raw)
-                    by_id[pid] = lead
-                    _claim_phone(lead)
+    work: deque[tuple[Tile, str]] = deque(
+        (tile, kw) for tile in tiles for kw in niche.keywords
+    )
+    searches_done = 0
+    while work:
+        if searches_done >= MAX_TILES:
+            logger.warning(
+                "MAX_TILES=%d reached; stopping further (tile,keyword) searches.", MAX_TILES
+            )
+            break
+        tile, keyword = work.popleft()
+        page = client.search(tile.lat, tile.lng, tile.radius_km, keyword)
+        searches_done += 1
+        for raw in page.results:
+            pid = raw.get("place_id")
+            if not pid:
+                continue
+            if pid not in by_id:  # dedup on place_id — mandatory (idea.md §10)
+                lead = _raw_to_lead(raw)
+                by_id[pid] = lead
+                _claim_phone(lead)
+        if page.saturated and tile.depth < MAX_SUBDIVIDE_DEPTH:
+            for sub_tile in _subdivide(tile):
+                work.append((sub_tile, keyword))
 
     for source in extra_sources or []:
         for raw in source.discover(geo, niche):

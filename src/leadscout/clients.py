@@ -25,7 +25,7 @@ import httpx
 from openai import OpenAI
 
 from .cache import JsonCache
-from .models import BBox, GeographyInput, NicheSpec, ScoreResult, Source
+from .models import BBox, GeographyInput, NicheSpec, ScoreResult, SearchPage, Source
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 class PlacesClient(Protocol):
     def geocode_bbox(self, query: str) -> BBox: ...
-    def search(self, lat: float, lng: float, radius_km: float, keyword: str) -> list[dict]: ...
+    def search(self, lat: float, lng: float, radius_km: float, keyword: str) -> SearchPage: ...
 
 
 class FixturePlacesClient:
@@ -52,11 +52,12 @@ class FixturePlacesClient:
     def geocode_bbox(self, query: str) -> BBox:
         return BBox.model_validate(self._data["bbox"])
 
-    def search(self, lat: float, lng: float, radius_km: float, keyword: str) -> list[dict]:
-        # Filter recorded results by keyword tag if present, else return all.
-        results = self._data["results"]
-        tagged = [r for r in results if keyword in r.get("_match_keywords", [keyword])]
-        return tagged or results
+    def search(self, lat: float, lng: float, radius_km: float, keyword: str) -> SearchPage:
+        all_results = self._data["results"]
+        tagged = [r for r in all_results if keyword in r.get("_match_keywords", [keyword])]
+        matched = tagged or all_results
+        saturated = keyword in self._data.get("saturated_keywords", [])
+        return SearchPage(results=matched, saturated=saturated)
 
 
 class LivePlacesClient:
@@ -114,16 +115,19 @@ class LivePlacesClient:
             self._cache.set("geocode", query, bbox.model_dump())
         return bbox
 
-    def search(self, lat: float, lng: float, radius_km: float, keyword: str) -> list[dict]:
+    def search(self, lat: float, lng: float, radius_km: float, keyword: str) -> SearchPage:
         radius_m = min(radius_km, 50) * 1000
         key = f"{round(lat, 4)},{round(lng, 4)},r{int(radius_m)}|{keyword}"
         if self._cache is not None and self._cache.has("places_pages", key):
             cached = self._cache.get("places_pages", key)
-            return list(cached) if cached is not None else []
+            cached_list: list[dict] = list(cached) if cached is not None else []
+            # Recompute saturation from result count — avoids a cache format migration.
+            return SearchPage(results=cached_list, saturated=len(cached_list) >= self.MAX_RESULTS)
 
         results: list[dict] = []
         page_token: str | None = None
         pages = 0
+        saturated = False
         while True:
             data = self._search_page(keyword, lat, lng, radius_m, page_token)
             for p in data.get("places", []):
@@ -132,11 +136,10 @@ class LivePlacesClient:
             page_token = data.get("nextPageToken")
             if not page_token or pages >= self.MAX_PAGES or len(results) >= self.MAX_RESULTS:
                 if page_token:
-                    # 60-cap / saturation: log, do NOT subdivide here. Subdivision/keyword
-                    # narrowing hooks in at discover.resolve_tiles (see TODO there).
+                    saturated = True
                     logger.warning(
                         "(tile,keyword) saturated: lat=%s lng=%s keyword=%r hit %d results / "
-                        "%d pages with nextPageToken still present; consider tile subdivision.",
+                        "%d pages with nextPageToken still present; subdividing.",
                         lat, lng, keyword, len(results), pages,
                     )
                 break
@@ -145,7 +148,7 @@ class LivePlacesClient:
             self._cache.set("places_pages", key, results)
             for place in results:
                 self._cache.set("places", place["place_id"], place)
-        return results
+        return SearchPage(results=results, saturated=saturated)
 
     def _search_page(
         self, keyword: str, lat: float, lng: float, radius_m: float, page_token: str | None

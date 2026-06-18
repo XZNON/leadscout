@@ -47,13 +47,13 @@ def test_search_paginates_and_normalizes() -> None:
         )
 
     client = _client(handler)
-    results = client.search(12.97, 77.59, 10.0, "dentist")
+    page = client.search(12.97, 77.59, 10.0, "dentist")
 
-    assert len(results) == 3
-    assert [r["place_id"] for r in results] == ["p1", "p2", "p3"]
-    assert all(isinstance(r["name"], str) and r["name"] for r in results)
+    assert len(page.results) == 3
+    assert [r["place_id"] for r in page.results] == ["p1", "p2", "p3"]
+    assert all(isinstance(r["name"], str) and r["name"] for r in page.results)
 
-    lead = _raw_to_lead(results[0])
+    lead = _raw_to_lead(page.results[0])
     assert lead.place_id == "p1"
     assert lead.name == "Alpha Dental"
     assert lead.website == "https://p1.example.com"
@@ -98,7 +98,7 @@ def test_search_cache_prevents_refetch(tmp_path) -> None:
     first = client.search(12.97, 77.59, 10.0, "dentist")
     second = client.search(12.97, 77.59, 10.0, "dentist")
 
-    assert first == second
+    assert first.results == second.results
     assert calls["n"] == 1, "second call must hit cache, not the network"
 
 
