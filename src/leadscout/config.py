@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import cast
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from .models import GeographyInput, ICPSpec, NicheSpec
+from .models import GeographyInput, ICPSpec, NicheSpec, OpenerFormat
 
 # Cheap/fast model for the per-lead scoring step (idea.md §7: "use a cheaper/faster model").
 DEFAULT_SCORING_MODEL = "gpt-4o-mini"
@@ -22,10 +23,15 @@ class RunConfig(BaseModel):
     scoring_model: str = DEFAULT_SCORING_MODEL
     budget_usd: float = DEFAULT_BUDGET_USD
     max_score: int | None = None  # cap how many survivors reach the LLM (cost guard)
+    max_enrich: int | None = None  # cap candidates sent to Stage 3 (speed guard for testing)
+    output_fields: list[str] | None = None  # if set, only these fields appear in CSV/JSONL
     offline: bool = False  # wire fixture clients instead of live APIs
     out_dir: Path = Path("out")
     cache_dir: Path = Path(".cache")
     db_path: Path = Path(".cache/leadscout.db")
+    opener_formats: list[OpenerFormat] = Field(
+        default_factory=lambda: cast("list[OpenerFormat]", ["call"])
+    )
     # Stage 3 politeness
     max_concurrency: int = 5
     request_timeout_s: float = 10.0
@@ -38,6 +44,9 @@ class RunConfig(BaseModel):
             env_defaults["scoring_model"] = model
         if budget := os.getenv("LEADSCOUT_BUDGET_USD"):
             env_defaults["budget_usd"] = float(budget)
+        if opener_env := os.getenv("LEADSCOUT_OPENER_FORMATS"):
+            parts = [f.strip().lower() for f in opener_env.split(",") if f.strip()]
+            env_defaults["opener_formats"] = list(dict.fromkeys(parts))  # dedup, preserve order
         env_defaults.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**env_defaults)
 

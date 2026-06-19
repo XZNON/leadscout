@@ -59,9 +59,19 @@ operator-driven state advancement. `lead_state` column added to CSV. 9 new tests
 Run-twice offline smoke proves cross-run state: run 1 `new=10 seen=0`, run 2 `new=0 seen=10`.
 Item E remains ⬜.
 
-### E. Opener format variants (idea.md §12.5)
+### E. Opener format variants (idea.md §12.5) — ✅ done
 Call-script vs email vs WhatsApp opener templates, selectable per run. Still grounded in detected
 signals — no generic templates.
+
+**Outcome:** `OpenerFormat = Literal["call", "email", "whatsapp"]` added to `models.py`. `ScoreResult`
+and `Lead` gain `opener_call`/`opener_email`/`opener_whatsapp` (all defaulted `""`). `RunConfig.opener_formats`
+(default `["call"]`) is the per-run toggle, readable from `LEADSCOUT_OPENER_FORMATS` env var and
+`--opener-format` CLI flag (repeatable/comma-list). Single Stage-4 LLM call returns only the
+requested format fields; `_ground_opener` loops over each and rewrites any ungrounded variant to cite
+`detected_signals[0]` — no generic openers ever shipped. `score_lead` sets `suggested_opener` from the
+primary format (back-compat). All three columns added to CSV; JSONL carries them automatically. 8 new
+offline tests (prompt content, per-variant grounding, ungrounded-rewrite, back-compat, primary mirror,
+budget, env parsing, bad-value reject); 84 pytest green; ruff/mypy clean; offline smoke run passes.
 
 ## Hard out-of-scope (do NOT build — idea.md §10/§11)
 - Auto-dialing, AI-voice calling, bulk email/WhatsApp blasting — not even a stub.

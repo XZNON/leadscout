@@ -19,7 +19,7 @@ of work: open it, do the steps, hit its "Definition of done", commit, then move 
 | 04 | [Live enrichment (scraping)](session-04-live-enrich.md) | ✅ | robots-aware async scraper replaces HTTP stub |
 | 05 | [Live scoring (OpenAI)](session-05-live-score.md) | ✅ | Structured-output LLM + token-cost budget enforcement |
 | 06 | [First real run & tuning](session-06-real-run.md) | ✅ | End-to-end on Bengaluru dental; tune ICP/filters |
-| 07+ | [Post-MVP backlog](session-07-post-mvp.md) | 🔨 | ✅ A: JustDial/IndiaMART sources; ✅ B: state tiling; ✅ C: owner enrichment; ✅ D: SQLite store; ⬜ E: opener variants |
+| 07+ | [Post-MVP backlog](session-07-post-mvp.md) | 🔨 | ✅ A: JustDial/IndiaMART sources; ✅ B: state tiling; ✅ C: owner enrichment; ✅ D: SQLite store; ✅ E: opener variants |
 
 **Rule of thumb on effort (from CLAUDE.md):** discovery is commodity plumbing; the product is the
 Stage-4 qualification + opener layer. Sessions 03–04 should be boring and correct. Session 05 and

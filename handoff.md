@@ -1,46 +1,57 @@
 # Session Handoff
-_Generated: 2026-06-18_
+_Generated: 2026-06-19_
 
 ## Goal
-Incrementally build out LeadScout — an internal CLI lead-generation tool — one session at a time, following the `docs/sessions/` roadmap. The current work is Session 07+ (post-MVP backlog), picking one item per session in order. This session completed **item C: owner-name enrichment** in Stage 3.
+Incrementally build out LeadScout — an internal CLI lead-generation tool — one session at a time, following the `docs/sessions/` roadmap. The current work completed **item E: Opener format variants (call/email/WhatsApp)** from the Session 07+ post-MVP backlog.
 
 ## Current State
-The full pipeline is working end-to-end (offline smoke run passes, 61 tests green, ruff/mypy clean). All gates pass:
+The full pipeline is working end-to-end (offline smoke run passes, 84 tests green, ruff/mypy clean). All gates pass:
 ```
-uv run pytest -q          # 61 passed
+uv run pytest -q          # 84 passed
 uv run ruff check .       # All checks passed
-uv run mypy               # Success: no issues found in 13 source files
-uv run leadscout run --icp examples/clinic.yaml --geo "Bengaluru" --niche examples/dental.yaml --offline
+uv run mypy               # Success: no issues found in 14 source files
+uv run leadscout run --icp examples/clinic.yaml --geo "Bengaluru" --niche examples/dental.yaml \
+  --offline --opener-format call --opener-format email --opener-format whatsapp
+# top: Bright Smile Dental  fit=88  opener="Noticed a couple of your Google reviews..."
+# leads.csv has opener_call / opener_email / opener_whatsapp columns
 ```
 
 Session 07+ backlog status:
 - **A — JustDial/IndiaMART sources** ✅ done
 - **B — State-level tiling** ✅ done
-- **C — Owner-name enrichment** ✅ done (this session)
-- **D — SQLite cross-run store** ⬜ not started
-- **E — Opener format variants** ⬜ not started
+- **C — Owner-name enrichment** ✅ done
+- **D — SQLite cross-run store** ✅ done
+- **E — Opener format variants** ✅ done (this session)
+
+All items in Session 07+ are now done. The roadmap has no further planned sessions.
 
 ## Files Being Edited
-- `src/leadscout/stages/enrich.py` — Added `_OWNER_LABEL_RE`, `_best_owner()`, `_candidate_pages()`; updated `enrich_lead` and `enrich_async._one` to try on-site candidate pages (`/about`, `/about-us`, `/team`, `/contact`) when the homepage yields no owner name. All extra fetches fold into the single per-`place_id` cache entry.
-- `fixtures/scrapes/familydental.example.html` — New fixture: homepage with "Owner: Ramesh Gupta" (label form, no Dr. prefix).
-- `fixtures/scrapes/teamclinic.example.html` — New fixture: landing copy has no owner; name ("Owner: Priya Sharma") only in the team section — exercises the multi-page fetch path.
-- `fixtures/scrapes/plainclinic.example.html` — New fixture: no extractable name — negative case (`owner_name is None`).
-- `tests/test_enrich.py` — Extended with 6 new tests: `_best_owner` unit tests, `_candidate_pages`, label-form extraction, multi-page fetch (fetch_count >= 2), and absent-name negative case.
-- `docs/sessions/session-07-post-mvp.md` — Item C marked done with outcome note.
-- `docs/sessions/README.md` — Row updated to reflect A, B, C all done.
+- `src/leadscout/models.py` — Added `OpenerFormat = Literal["call", "email", "whatsapp"]`. `ScoreResult` gains `opener_call`, `opener_email`, `opener_whatsapp` (all `str = ""`). `Lead` Stage-4 block gains the same three fields.
+- `src/leadscout/config.py` — `RunConfig` gains `opener_formats: list[OpenerFormat]` (default `["call"]`); `from_env` reads `LEADSCOUT_OPENER_FORMATS` (comma-list).
+- `src/leadscout/stages/score.py` — `build_prompt(lead, icp, formats)` now takes formats and builds only the requested opener instructions. `_ground_opener(result, formats)` loops over requested fields and rewrites ungrounded variants. `score_lead` threads `formats`, sets `suggested_opener` from primary format, copies only requested format fields onto `Lead`. `score` passes `cfg.opener_formats`.
+- `src/leadscout/cli.py` — Added `--opener-format` option (repeatable/comma-list, default `["call"]`). Normalizes and deduplicates before passing to `RunConfig.from_env`.
+- `src/leadscout/io_out.py` — Added `opener_call`, `opener_email`, `opener_whatsapp` to `CSV_COLUMNS` after `suggested_opener`.
+- `fixtures/llm_scores.json` — Added `opener_call`/`opener_email`/`opener_whatsapp` to `p_bright` and `p_cityhosp` (all grounded). Added `p_ungrounded` fixture with a deliberately generic `opener_email` to exercise the rewrite path.
+- `tests/test_score.py` — Added 8 new offline tests covering: prompt content per format, all variants grounded, ungrounded rewrite, back-compat, primary mirror, budget, env parsing, bad-value reject.
+- `docs/sessions/session-07-post-mvp.md` — Item E marked ✅ with outcome note.
+- `docs/sessions/README.md` — Row updated: E now ✅.
 
 ## What We Tried That Failed
-Nothing failed this session — implementation went straight through on the first attempt. Key design decision worth noting: `_extract()` intentionally keeps using `_OWNER_RE` (Dr. form only) on the homepage, while the extra-page path uses `_best_owner` (label + Dr. forms). This asymmetry is what makes the fixture tests work correctly with `FixtureHttpClient`'s host-keyed file serving (both homepage and `/about` return the same `.html` file, so the label-form name is only "found" via the extra-page `_best_owner` call, not the homepage `_extract`).
+- Initially `score_lead` copied ALL format fields from the fixture result onto `Lead`, even for non-requested formats (e.g., default `["call"]` run would populate `opener_email` from the fixture). Fixed by only copying fields for the requested formats in a loop over `formats`.
+- `typer.Option(["call"], ...)` with `list[str]` annotation triggers ruff B008 because lists are mutable. Fixed by using `None` default and applying the `["call"]` fallback in the function body, with `# noqa: B008` for the remaining `list[str] | None` annotation.
 
 ## Next Step
-Start **Session 07D — SQLite cross-run store**. The spec is in `docs/sessions/session-07-post-mvp.md` under item D. The goal is to replace the flat-file JSON cache + CSV output with a lightweight local SQLite DB so lead state and dedup persist across runs. CSV/JSONL export should be kept. Check for `Implementations/step07D_implementation.md` first; if it doesn't exist, read the session-07 backlog item and draft one before coding.
+The Session 07+ backlog is exhausted (A–E all ✅). The next step is to check `docs/sessions/` for any remaining planned sessions beyond 07, or start a new backlog item based on `idea.md` or operator feedback. Open `docs/sessions/README.md` first and pick the lowest-numbered not-started item.
 
 ## Additional Context
 - **Workflow:** always open `docs/sessions/README.md` first, pick the lowest-numbered not-started item, do its steps, mark it done, commit. Don't pull work forward.
 - **User commits themselves** — never run `git commit`; leave it to the user.
 - **Secrets:** user self-manages `.env`; don't touch `.env.example` or gitignored harness files.
-- **Test discipline:** all tests must be fully offline (no live API calls). `FixtureHttpClient` (keyed by hostname) is the HTTP seam; `JsonCache(tmp_path)` is the cache seam. Live runs are operator-driven only.
-- **Stage 3 constraint:** zero LLM, deterministic, I/O-bound, robots-aware, cache by `place_id`. Honored in 07C and must stay that way.
-- **LinkedIn / off-site scraping:** explicitly declined on ToS + fragility grounds. Only sanctioned future route is an official API with credentials in `.env`.
+- **Test discipline:** all tests must be fully offline (no live API calls). `FixtureLlmClient` maps `place_id` tags in prompts to canned `ScoreResult` from `fixtures/llm_scores.json`.
+- **Grounding is CODE, not a prompt hope.** `_ground_opener` enforces it by rewriting any non-overlapping opener to cite `detected_signals[0]`. Prompt is just the first request; the code is the backstop.
+- **Single LLM call per lead regardless of format count.** `build_prompt` includes only the requested format instructions; the model returns them in one call. Multi-format does not multiply calls or cost.
+- **`suggested_opener` back-compat:** always mirrors the first requested format's field. Default `["call"]` run is byte-identical to before.
+- **`lead_state` vs `state`:** `Lead.state` is address state. `Lead.lead_state` is cross-run store state. Don't confuse.
 - **Run command:** `uv run leadscout run --icp examples/clinic.yaml --geo "Bengaluru" --niche examples/dental.yaml`
 - **Package manager:** `uv`. Everything runs via `uv run`.
+- **Don't stage** `out/`, `.cache/`, `*.db` files.

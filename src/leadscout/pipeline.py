@@ -68,11 +68,12 @@ def run_pipeline(
 
     # Stage 3 — enrich (deterministic, cached, robots-aware). Offline drives the sync fixture
     # path; live runs use the concurrent async scraper (politeness cap lives in the client).
+    to_enrich = candidates[: cfg.max_enrich] if cfg.max_enrich is not None else candidates
     if cfg.offline:
-        enriched = s_enrich.enrich(candidates, cast("HttpClient", http), cache)
+        enriched = s_enrich.enrich(to_enrich, cast("HttpClient", http), cache)
     else:
         enriched = asyncio.run(
-            s_enrich.enrich_async(candidates, cast("AsyncHttpClient", http), cache)
+            s_enrich.enrich_async(to_enrich, cast("AsyncHttpClient", http), cache)
         )
 
     # Stage 4 — score (LLM, ONLY on survivors, budget-capped)

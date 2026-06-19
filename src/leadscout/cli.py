@@ -46,18 +46,32 @@ def run(
     offline: bool = typer.Option(False, "--offline", help="Use fixtures; no keys, no network."),
     no_score: bool = typer.Option(False, "--no-score", help="Stop after Stage 3 (no LLM)."),
     max_score: int | None = typer.Option(None, "--max-score", help="Cap survivors sent to LLM."),
+    max_enrich: int | None = typer.Option(None, "--max-enrich", help="Cap Stage 3 (speed)."),
+    fields: str | None = typer.Option(None, "--fields", help="Comma-separated fields for output."),
     out_dir: str = typer.Option("out", "--out", help="Output directory."),
     db: str | None = typer.Option(None, "--db", help="SQLite DB path."),
+    opener_format: list[str] | None = typer.Option(  # noqa: B008
+        None, "--opener-format",
+        help="Opener channel(s): call|email|whatsapp (repeatable or comma-list)."
+    ),
 ) -> None:
     """Run the four-stage pipeline and write ranked leads + a disqualified audit file."""
     icp_spec = load_icp(icp)
     niche_spec = load_niche(niche)
     geography = load_geography(geo)
+    # Flatten comma-lists, strip/lower, dedup — pydantic validates each value against OpenerFormat.
+    raw_parts = opener_format or ["call"]
+    raw_formats = [f.strip().lower() for part in raw_parts for f in part.split(",") if f.strip()]
+    parsed_formats = list(dict.fromkeys(raw_formats))
+    parsed_fields = [f.strip() for f in fields.split(",") if f.strip()] if fields else None
     cfg = RunConfig.from_env(
         offline=offline,
         max_score=(0 if no_score else max_score),
+        max_enrich=max_enrich,
         out_dir=Path(out_dir),
         db_path=Path(db) if db else None,
+        opener_formats=parsed_formats if parsed_formats else None,
+        output_fields=parsed_fields,
     )
 
     # Extra discovery sources are config-as-data: enabled per niche YAML (Places always canonical).
@@ -86,7 +100,7 @@ def run(
     result = run_pipeline(
         geography, niche_spec, icp_spec, cfg, places, http, llm, extra_sources=sources
     )
-    paths = write_outputs(result.leads, result.dropped, cfg.out_dir)
+    paths = write_outputs(result.leads, result.dropped, cfg.out_dir, cfg.output_fields)
 
     typer.echo(
         f"discovered={result.raw_count}  new={result.new_count}  seen={result.seen_count}  "

@@ -13,12 +13,18 @@ from __future__ import annotations
 
 from ..clients import LlmClient
 from ..config import RunConfig
-from ..models import ICPSpec, Lead, ScoreResult
+from ..models import ICPSpec, Lead, OpenerFormat, ScoreResult
 
 DISQUALIFIED_SCORE_CAP = 15
 
+_FORMAT_FIELD: dict[str, str] = {
+    "call": "opener_call",
+    "email": "opener_email",
+    "whatsapp": "opener_whatsapp",
+}
 
-def build_prompt(lead: Lead, icp: ICPSpec) -> str:
+
+def build_prompt(lead: Lead, icp: ICPSpec, formats: list[OpenerFormat]) -> str:
     """Construct the scoring prompt. Tagged markers ([[PLACE_ID:..]]) let the fixture LLM map
     deterministically; the live model ignores them and reads the natural-language body."""
     signals = "\n".join(f"  - {s}" for s in icp.pain_signals) or "  (none specified)"
@@ -78,25 +84,53 @@ GROUNDING RULES (enforced — violating them is a failure):
     or any disqualifier from a missing or unremarkable site_text. When unsure, leave it empty:
     wrongly disqualifying a real single clinic loses a good lead and is worse than missing one.
   - detected_signals must list the OBSERVED pain (e.g. "no online booking link on the website"),
-    never a positive ("has booking"). The suggested_opener MUST reference one specific entry from
-    detected_signals in plain words, framed as an opportunity we can help with.
+    never a positive ("has booking"). Each requested opener field MUST reference one specific entry
+    from detected_signals in plain words, framed as an opportunity we can help with.
 
-Return JSON: fit_score (0-100), detected_signals[], disqualifiers_hit[], reasoning,
-suggested_opener.
+Return JSON: fit_score (0-100), detected_signals[], disqualifiers_hit[], reasoning, and these
+opener field(s) — produce ONLY the ones listed here:
+{_build_format_block(formats)}
 """
 
 
-def _ground_opener(result: ScoreResult) -> ScoreResult:
-    """Guarantee the opener references a real detected signal (non-negotiable #6)."""
+def _build_format_block(formats: list[OpenerFormat]) -> str:
+    lines = []
+    for fmt in formats:
+        if fmt == "call":
+            lines.append(
+                "  opener_call: 1-2 spoken lines for a phone call opening. "
+                "MUST reference one specific entry from detected_signals in plain words, "
+                "framed as an opportunity we can help with."
+            )
+        elif fmt == "email":
+            lines.append(
+                "  opener_email: 2-3 sentence email body, no subject line. "
+                "MUST reference one specific entry from detected_signals in plain words, "
+                "framed as an opportunity we can help with."
+            )
+        elif fmt == "whatsapp":
+            lines.append(
+                "  opener_whatsapp: one short, informal WhatsApp message. "
+                "MUST reference one specific entry from detected_signals in plain words, "
+                "framed as an opportunity we can help with."
+            )
+    return "\n".join(lines)
+
+
+def _ground_opener(result: ScoreResult, formats: list[OpenerFormat]) -> ScoreResult:
+    """Guarantee every requested opener variant references a real detected signal (#6)."""
     if not result.detected_signals:
         return result
-    opener = result.suggested_opener or ""
-    if any(_overlaps(opener, sig) for sig in result.detected_signals):
-        return result
-    sig = result.detected_signals[0]
-    return result.model_copy(
-        update={"suggested_opener": f"Noticed {sig} — wanted to reach out about that."}
-    )
+    sig0 = result.detected_signals[0]
+    updates: dict[str, str] = {}
+    for fmt in formats:
+        field = _FORMAT_FIELD[fmt]
+        val = getattr(result, field) or ""
+        if val and not any(_overlaps(val, sig) for sig in result.detected_signals):
+            updates[field] = f"Noticed {sig0} — wanted to reach out about that."
+    if updates:
+        return result.model_copy(update=updates)
+    return result
 
 
 def _overlaps(opener: str, signal: str) -> bool:
@@ -106,20 +140,27 @@ def _overlaps(opener: str, signal: str) -> bool:
     return any(w in o for w in words)
 
 
-def score_lead(lead: Lead, icp: ICPSpec, llm: LlmClient, model: str) -> Lead:
-    result = llm.score(model, build_prompt(lead, icp))
+def score_lead(
+    lead: Lead, icp: ICPSpec, llm: LlmClient, model: str, formats: list[OpenerFormat]
+) -> Lead:
+    result = llm.score(model, build_prompt(lead, icp, formats))
     if result.disqualifiers_hit:
         result = result.model_copy(
             update={"fit_score": min(result.fit_score, DISQUALIFIED_SCORE_CAP)}
         )
-    result = _ground_opener(result)
-    return lead.model_copy(update={
+    result = _ground_opener(result, formats)
+    primary_opener = getattr(result, _FORMAT_FIELD[formats[0]])
+    updates: dict[str, object] = {
         "fit_score": result.fit_score,
         "detected_signals": result.detected_signals,
         "disqualifiers_hit": result.disqualifiers_hit,
         "reasoning": result.reasoning,
-        "suggested_opener": result.suggested_opener,
-    })
+        "suggested_opener": primary_opener,
+    }
+    for fmt in formats:
+        field = _FORMAT_FIELD[fmt]
+        updates[field] = getattr(result, field)
+    return lead.model_copy(update=updates)
 
 
 def score(leads: list[Lead], icp: ICPSpec, llm: LlmClient, cfg: RunConfig) -> list[Lead]:
@@ -130,6 +171,6 @@ def score(leads: list[Lead], icp: ICPSpec, llm: LlmClient, cfg: RunConfig) -> li
         if llm.spent_usd >= cfg.budget_usd:
             # Budget hit mid-run is expected behavior, not a crash. Stop scoring.
             break
-        scored.append(score_lead(lead, icp, llm, cfg.scoring_model))
+        scored.append(score_lead(lead, icp, llm, cfg.scoring_model, cfg.opener_formats))
     scored.sort(key=lambda x: x.fit_score or 0, reverse=True)
     return scored

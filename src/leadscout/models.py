@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 
 Source = Literal["google_places", "justdial", "indiamart"]
 LeadState = Literal["new", "seen", "contacted"]
+OpenerFormat = Literal["call", "email", "whatsapp"]
 
 
 # --------------------------------------------------------------------------- inputs
@@ -137,6 +138,9 @@ class Lead(BaseModel):
     disqualifiers_hit: list[str] = Field(default_factory=list)
     reasoning: str | None = None
     suggested_opener: str | None = None
+    opener_call: str = ""
+    opener_email: str = ""
+    opener_whatsapp: str = ""
 
     # --- cross-run store (display only; not a Stage contract) ---
     lead_state: LeadState | None = None
@@ -154,6 +158,9 @@ class ScoreResult(BaseModel):
     disqualifiers_hit: list[str] = Field(default_factory=list)
     reasoning: str = ""
     suggested_opener: str = ""
+    opener_call: str = ""
+    opener_email: str = ""
+    opener_whatsapp: str = ""
 
 
 class DropRecord(BaseModel):

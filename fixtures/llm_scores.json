@@ -8,7 +8,10 @@
     ],
     "disqualifiers_hit": [],
     "reasoning": "Owner-operated single clinic, in review range, clear phone-booking friction and no online booking — strong fit for appointment-booking SaaS.",
-    "suggested_opener": "Noticed a couple of your Google reviews mention trouble getting through on the phone to book — we help clinics like Bright Smile take bookings online so those calls don't get lost."
+    "suggested_opener": "Noticed a couple of your Google reviews mention trouble getting through on the phone to book — we help clinics like Bright Smile take bookings online so those calls don't get lost.",
+    "opener_call": "Noticed a couple of your Google reviews mention trouble getting through on the phone to book — we help clinics take bookings online so those calls don't get lost.",
+    "opener_email": "I came across Bright Smile and noticed several reviews mention patients being unable to reach you by phone to book appointments. We help clinics move those bookings online — happy to show you how it works if useful.",
+    "opener_whatsapp": "Hi! Saw some of your reviews mention trouble booking by phone — we help clinics like yours take bookings online. Worth a quick chat?"
   },
   "p_cityhosp": {
     "fit_score": 72,
@@ -21,6 +24,22 @@
       "part of a hospital chain"
     ],
     "reasoning": "Already on Practo and part of a hospital chain — both ICP disqualifiers.",
-    "suggested_opener": "Saw you already handle online booking through Practo — likely not a fit right now."
+    "suggested_opener": "Saw you already handle online booking through Practo — likely not a fit right now.",
+    "opener_call": "Noticed you are already using Practo for online booking — likely not a fit for us right now, but wanted to check.",
+    "opener_email": "I noticed City Hospital already uses Practo for online bookings — you are likely sorted on that front, so this may not be relevant right now.",
+    "opener_whatsapp": "Hi! Saw you already use Practo for bookings — probably not a fit right now, but feel free to reach out if that changes."
+  },
+  "p_ungrounded": {
+    "fit_score": 65,
+    "detected_signals": [
+      "website has no appointment booking form or link",
+      "only a contact phone number listed on the site"
+    ],
+    "disqualifiers_hit": [],
+    "reasoning": "Independent clinic with no online booking — reasonable fit.",
+    "suggested_opener": "Noticed they have no online booking — wanted to reach out.",
+    "opener_call": "Noticed your website has no appointment booking form — we help clinics add online booking so patients can book any time.",
+    "opener_email": "Hi, hope you are well — wanted to introduce our product.",
+    "opener_whatsapp": "Hey! Noticed your site only lists a phone number for appointments — we can help add online booking."
   }
 }
